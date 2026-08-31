@@ -1990,8 +1990,13 @@
 
   <div id="grade"></div><div id="noise"></div><div id="flash"></div><div id="curtain"></div>
 
+  <script>
+    window.__earth3dModule = { exports: {} };
+    window.exports = window.__earth3dModule.exports;
+  </script>
+  <script src="./scripts/three.legacy.js"></script>
   <script type="module">
-    import * as THREE from './scripts/three.module.js';
+    const THREE = window.__earth3dModule.exports;
 
     const $ = (id) => document.getElementById(id);
     // 电影设定：行星发动机共 12000 台，其中 10000 台用于推进，赤道附近 2000 台用于转向。
@@ -2194,6 +2199,7 @@
     manager.onLoad = () => setTimeout(() => $('loader').classList.add('done'), 350);
     manager.onError = () => $('loader').querySelector('.loader-copy').textContent = '纹理降级 · 程序画面继续运行';
     const loader = new THREE.TextureLoader(manager);
+    if (location.protocol === 'file:') loader.setCrossOrigin(undefined);
     const textureRoot = './img/';
     const colorMap = loader.load(textureRoot + 'earth_atmos_2048.jpg', tex => {
       tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
