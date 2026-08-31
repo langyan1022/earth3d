@@ -1995,6 +1995,7 @@
     window.exports = window.__earth3dModule.exports;
   </script>
   <script src="./scripts/three.legacy.js"></script>
+  <script src="./scripts/texture-data.js"></script>
   <script type="module">
     const THREE = window.__earth3dModule.exports;
 
@@ -2199,7 +2200,10 @@
     manager.onLoad = () => setTimeout(() => $('loader').classList.add('done'), 350);
     manager.onError = () => $('loader').querySelector('.loader-copy').textContent = '纹理降级 · 程序画面继续运行';
     const loader = new THREE.TextureLoader(manager);
-    if (location.protocol === 'file:') loader.setCrossOrigin(undefined);
+    if (location.protocol === 'file:') {
+      loader.setCrossOrigin(undefined);
+      manager.setURLModifier(url => window.__earth3dFileTextures[url] || url);
+    }
     const textureRoot = './img/';
     const colorMap = loader.load(textureRoot + 'earth_atmos_2048.jpg', tex => {
       tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -2764,7 +2768,14 @@
       const texture = makeTrailTexture();
       const group = new THREE.Group();
       const items = [];
+      const pathStart = R + .23;
+      const pathLength = 5.95;
+      // 局部 y 轴在终态转向后对应画面中的前进方向；两侧流线从球缘向尾部收拢。
+      const flowOffset = u => .48
+        + 1.44 * (1 - smooth(.02, .55, u))
+        + Math.sin(u * Math.PI) * .16;
       for (let i=0;i<58;i++) {
+        const lane = i % 2 ? 1 : -1;
         const material = new THREE.SpriteMaterial({
           map:texture, color:i%5 ? 0x6ebbe0 : 0xd6f7ff,
           transparent:true, opacity:0, depthWrite:false,
@@ -2772,19 +2783,37 @@
           rotation:(rand()-.5)*.08
         });
         const sprite = new THREE.Sprite(material);
-        const base = new THREE.Vector3((rand()-.5)*2.6, R+.25+rand()*4.4, (rand()-.5)*3.2);
+        const u = rand();
         const width = 1.8+rand()*5.2, height=.1+rand()*.34;
-        sprite.position.copy(base); sprite.scale.set(width,height,1); group.add(sprite);
-        items.push({sprite,material,base,phase:rand()*8,speed:.05+rand()*.08,max:.08+rand()*.16});
+        const z = (rand()-.5)*3.2;
+        sprite.position.set(-lane * flowOffset(u), pathStart + u * pathLength, z);
+        sprite.scale.set(width,height,1); group.add(sprite);
+        items.push({
+          sprite, material, lane, u, width, height, z,
+          rotation:material.rotation, phase:rand()*8,
+          speed:.05+rand()*.08, max:.08+rand()*.16
+        });
       }
       earthSpin.add(group);
       return {
         update(t) {
           const on = smooth(IGNITION_START,18.15,t);
-          items.forEach((item,i) => {
-            item.sprite.position.y = item.base.y + on*(.25+((t*item.speed+item.phase)%1)*1.15);
-            item.sprite.position.x = item.base.x + Math.sin(t*.35+item.phase)*.12;
-            item.material.opacity = on*item.max*(.72+Math.sin(t*.7+item.phase)*.22);
+          items.forEach(item => {
+            const u = (item.u + t * item.speed * .22) % 1;
+            item.sprite.position.y = pathStart + u * pathLength;
+            item.sprite.position.x = -item.lane * flowOffset(u)
+              + Math.sin(t*.35+item.phase)*.05
+              + Math.sin(t*.09+item.phase)*.025;
+            item.sprite.position.z = item.z + Math.sin(t*.17+item.phase)*.09;
+            item.sprite.material.rotation = item.rotation
+              - item.lane * .30 * (1 - smooth(.05,.62,u));
+            item.sprite.scale.set(
+              item.width * (.52 + u*.70),
+              item.height * (1.08 - u*.22),
+              1
+            );
+            const fade = smooth(.01,.12,u) * (1 - smooth(.82,1,u));
+            item.material.opacity = on*item.max*fade*(.72+Math.sin(t*.7+item.phase)*.22);
           });
         }
       };
@@ -2797,7 +2826,17 @@
         uniforms:{uTime:{value:0},uOpacity:{value:0}},
         vertexShader:`
           varying vec2 vUv;
-          void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}
+          void main(){
+            vUv=uv;
+            vec3 p=position;
+            float x=uv.x;
+            float edge=abs(uv.y-.5)*2.0;
+            float side=sign(uv.y-.5);
+            float taper=mix(1.12,.64,smoothstep(.0,.72,x));
+            float bend=(1.0-smoothstep(.02,.72,x))*.52+sin(x*3.14159)*.12;
+            p.y=p.y*taper-side*bend*pow(edge,1.35);
+            gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.0);
+          }
         `,
         fragmentShader:`
           varying vec2 vUv;
@@ -2815,20 +2854,27 @@
           }
           void main(){
             float x=vUv.x, y=abs(vUv.y-.5);
-            float width=mix(.16,.46,x);
+            float width=mix(.43,.28,x);
             float body=1.-smoothstep(width*.2,width,y);
             float n=fbm(vec2(x*7.5-uTime*.16,vUv.y*19.+sin(x*10.)*.7));
             float filaments=fbm(vec2(x*15.-uTime*.28,vUv.y*42.));
             float density=body*(.2+.8*smoothstep(.2,.82,n*.78+filaments*.34));
-            float gate=smoothstep(.015,.08,x)*pow(1.-x,.82);
+            float laneOffset=mix(.35,.11,smoothstep(.02,.68,x))+sin(x*3.14159)*.025
+              +sin(uTime*.36+x*9.)*.012;
+            float laneWidth=mix(.026,.015,x);
+            float upperLane=exp(-pow((vUv.y-(.5+laneOffset))/laneWidth,2.));
+            float lowerLane=exp(-pow((vUv.y-(.5-laneOffset))/laneWidth,2.));
+            float lanes=max(upperLane,lowerLane);
+            float gate=smoothstep(.015,.08,x)*pow(1.-x,.68);
+            density=max(density*.72,lanes*(.18+.34*(.55+.45*filaments)));
             float a=density*gate*uOpacity*.82;
             vec3 cold=vec3(.12,.42,.73), hot=vec3(.7,.94,1.);
-            vec3 color=mix(cold,hot,pow(1.-x,2.8)+filaments*.13);
+            vec3 color=mix(cold,hot,clamp(pow(1.-x,2.8)+filaments*.13+lanes*.22,0.,1.));
             gl_FragColor=vec4(color,a);
           }
         `
       });
-      const mesh=new THREE.Mesh(new THREE.PlaneGeometry(7.4,4.4,1,1),material);
+      const mesh=new THREE.Mesh(new THREE.PlaneGeometry(7.4,4.4,32,12),material);
       scene.add(mesh); return mesh;
     }
 
@@ -3235,7 +3281,13 @@
       const texture = makeSmokeTexture();
       const rig = new THREE.Group();
       const items = [];
+      const pathStart = R - .05;
+      const pathLength = 6.9;
+      const flowOffset = u => .50
+        + 1.36 * (1 - smooth(.02, .58, u))
+        + Math.sin(u * Math.PI) * .13;
       for (let i = 0; i < 24; i++) {
+        const lane = i % 2 ? 1 : -1;
         const mat = new THREE.SpriteMaterial({
           map: texture, color: i % 4 ? 0x79acc4 : 0xb3d9e5,
           transparent: true, opacity: 0, depthWrite: false,
@@ -3243,12 +3295,13 @@
           rotation: rand()*Math.PI
         });
         const sprite = new THREE.Sprite(mat);
-        const side = i % 2 ? 1 : -1;
-        const base = new THREE.Vector3(side*(1.5+rand()*5.5), (rand()-.5)*7, -4-rand()*10);
+        const u = rand();
+        const z = -4-rand()*10;
+        const base = new THREE.Vector3(pathStart + u * pathLength, lane * flowOffset(u), z);
         const scale = 1.1 + rand()*3.6;
-        sprite.position.copy(base); sprite.scale.set(scale*1.8, scale, 1);
+        sprite.position.copy(base); sprite.scale.set(scale*(1.15+u*.7), scale*.72, 1);
         rig.add(sprite);
-        items.push({ sprite, base, speed: .025+rand()*.045, phase: rand()*10, max: .018+rand()*.055 });
+        items.push({ sprite, base, lane, u, z, scale, pathLength, flowOffset, speed: .025+rand()*.045, phase: rand()*10, max: .018+rand()*.055 });
       }
       scene.add(rig);
       return { rig, items };
@@ -3257,28 +3310,44 @@
     function updateSmoke(smoke, t) {
       const ignition = smooth(IGNITION_START, IGNITION_FULL, t);
       smoke.rig.rotation.z = Math.sin(t*.06)*.018;
-      smoke.items.forEach((item,i) => {
-        // 使用有界往复漂移，保证终态无限运行时烟雾不会逐渐飞出场景。
-        item.sprite.position.x = item.base.x
-          + Math.sin(t*item.speed + item.phase)*.85
-          + Math.sin(t*.041 + item.phase*1.7)*.48*(i%2?1:-1);
-        item.sprite.position.y = item.base.y + Math.cos(t*item.speed*.7 + item.phase)*.35;
-        item.sprite.material.rotation += .00025*(i%2?1:-1);
-        item.sprite.material.opacity = item.max * (.36 + ignition*.64) * (0.72 + Math.sin(t*.23+item.phase)*.2);
+      smoke.items.forEach(item => {
+        const u = (item.u + t * item.speed * .16) % 1;
+        // 沿两条有限长度的流线循环，避免烟雾逐渐飞出场景或突然跳出画面。
+        item.sprite.position.x = item.base.x + u * item.pathLength
+          - item.u * item.pathLength
+          + Math.sin(t*.35+item.phase)*.08;
+        item.sprite.position.y = item.lane * item.flowOffset(u)
+          + Math.sin(t*.28+item.phase)*.06;
+        item.sprite.position.z = item.z + Math.sin(t*.17+item.phase)*.10;
+        item.sprite.material.rotation += .00018 * item.lane;
+        item.sprite.scale.set(item.scale*(1.15+u*.7), item.scale*(.72-.12*u), 1);
+        const fade = smooth(.01,.12,u) * (1 - smooth(.84,1,u)*.8);
+        item.sprite.material.opacity = item.max * (.26 + ignition*.74) * fade
+          * (0.72 + Math.sin(t*.23+item.phase)*.2);
       });
     }
 
     function makeSmokeTexture() {
       const c = document.createElement('canvas'); c.width = c.height = 256;
       const x = c.getContext('2d');
-      for (let i=0;i<30;i++) {
-        const px = 50 + rand()*156, py = 50 + rand()*156, r = 20 + rand()*54;
-        const g = x.createRadialGradient(px,py,0,px,py,r);
-        g.addColorStop(0,'rgba(255,255,255,'+(0.025+rand()*.045)+')');
-        g.addColorStop(.42,'rgba(210,232,240,'+(0.012+rand()*.025)+')');
-        g.addColorStop(1,'rgba(120,160,180,0)');
-        x.fillStyle = g; x.fillRect(0,0,256,256);
+      x.globalCompositeOperation = 'lighter';
+      for (let i=0; i<26; i++) {
+        const y = 20 + rand()*216;
+        const grad = x.createLinearGradient(0,0,256,0);
+        const a = .018 + rand()*.036;
+        grad.addColorStop(0, 'rgba(225,248,255,'+(a*1.5)+')');
+        grad.addColorStop(.2, 'rgba(145,220,246,'+a+')');
+        grad.addColorStop(.66, 'rgba(75,155,208,'+(a*.48)+')');
+        grad.addColorStop(1, 'rgba(45,105,170,0)');
+        x.strokeStyle = grad;
+        x.lineWidth = 3 + rand()*13;
+        x.filter = 'blur('+(2.5+rand()*5).toFixed(1)+'px)';
+        x.beginPath();
+        x.moveTo(-16,y);
+        x.bezierCurveTo(54,y+(rand()-.5)*24,142,y+(rand()-.5)*42,272,y+(rand()-.5)*58);
+        x.stroke();
       }
+      x.filter = 'none';
       const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
       return tex;
     }

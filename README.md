@@ -13,7 +13,7 @@
 
 ## 运行
 
-项目不需要构建步骤。页面默认通过相对路径加载 Three.js 的浏览器脚本，Three.js 不再以 ES Module 方式从 `file://` 请求；同时在本地文件模式下关闭纹理的跨域属性，因此通常可以直接双击 `index.html` 打开。若浏览器或系统策略仍限制 `file://` 下的本地资源读取，请使用本地 HTTP 静态服务器：
+项目不需要构建步骤。页面默认通过相对路径加载 Three.js 的浏览器脚本；在 `file://` 模式下会自动使用 `texture-data.js` 中的内嵌纹理，绕开本地图片的跨域限制，因此可以直接双击 `index.html` 打开。若浏览器或系统策略仍限制 `file://` 下的本地资源读取，请使用本地 HTTP 静态服务器：
 
 ```powershell
 cd E:\dev2026\earth3d
@@ -42,7 +42,8 @@ python -m http.server 8000
 ├── index.html
 ├── scripts/
 │   ├── three.module.js       # 0.166.1 ES Module 备用版本
-│   └── three.legacy.js       # 0.166.1 浏览器直开版本
+│   ├── three.legacy.js       # 0.166.1 浏览器直开版本
+│   └── texture-data.js       # file:// 模式的内嵌纹理数据
 └── img/
     ├── earth_atmos_2048.jpg
     ├── earth_clouds_1024.png
@@ -54,4 +55,4 @@ python -m http.server 8000
 
 ## 资源说明
 
-Three.js 模块与行星纹理来自 three.js **0.166.1（r166）** 示例资源，相关版权和许可归原作者所有。`three.module.js` 是 ES Module 版本；`three.legacy.js` 是同版本的 CommonJS 浏览器加载副本，配合 `index.html` 内的轻量 shim 使用，避免直接打开 HTML 时触发模块 CORS 限制。项目将依赖保存为仓库内的本地文件，以便在无 CDN 的环境中运行。
+Three.js 模块与行星纹理来自 three.js **0.166.1（r166）** 示例资源，相关版权和许可归原作者所有。`three.module.js` 是 ES Module 版本；`three.legacy.js` 是同版本的 CommonJS 浏览器加载副本，配合 `index.html` 内的轻量 shim 使用。由于浏览器的 `file://` 安全策略会把本地图片视为跨域资源，`texture-data.js` 保存了 6 张本地纹理的 Base64 版本，仅在直接打开 HTML 时由 `LoadingManager` 使用；HTTP 模式仍读取 `img/` 原文件。项目将依赖保存为仓库内的本地文件，以便在无 CDN 的环境中运行。
