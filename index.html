@@ -2191,6 +2191,8 @@
     const FINAL_OCCULT_END = 25.15;
     const FINAL_FORM_START = 25.35;
     const R = 2.5;
+    // 太阳沿固定半径绕地球运动，避免终态换位时改变相对距离。
+    const SUN_DISTANCE = 7.9;
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.8));
     renderer.setSize(innerWidth, innerHeight);
@@ -2214,12 +2216,14 @@
     earthRoot.add(earthSpin);
 
     // 环境光只留极低填充；单一太阳主光负责把昼夜终止线照出来。
-    scene.add(new THREE.HemisphereLight(0x3c5e73, 0x01030a, 0.12));
+    scene.add(new THREE.HemisphereLight(0x3c5e73, 0x01030a, 0.20));
     const key = new THREE.DirectionalLight(0xfff1dc, 6.5);
     key.position.set(-8, .6, -3.5);
     key.target = earthRoot;
     scene.add(key);
     const visualSunDirection = new THREE.Vector3();
+    const sunOrbitDirection = new THREE.Vector3();
+    const terminalSunDirection = new THREE.Vector3(-.46, .02, -.89).normalize();
 
     const earthMaterial = new THREE.MeshPhongMaterial({
       color: 0x213947,
@@ -2401,14 +2405,14 @@
 
             vec3 scattered = betaRayleigh * sumRayleigh * phaseRayleigh
               + betaMie * sumMie * phaseMie;
-            // 盘面保留低强度散射，太阳朝向的壳面连续增亮，避免固定一圈假辉光。
+            // 盘面保留低强度散射；辉光随太阳入射方向衰减，不再把整圈轮廓等亮处理。
             float impact = length(cross(rayOrigin, rayDirection));
             float limb = smoothstep(uPlanetRadius * .36, uAtmosphereRadius * 1.02, impact);
             vec3 shellNormal = normalize(vWorldPosition - uPlanetCenter);
-            float shellSunFacing = smoothstep(-.48, .58, dot(shellNormal, sunDirection));
-            float atmosphereWeight = mix(.40, .90, limb)
-              + (1.0 - limb) * shellSunFacing * .24
-              + limb * .08;
+            float shellSunFacing = smoothstep(-.12, .62, dot(shellNormal, sunDirection));
+            float limbWeight = smoothstep(.28, 1.0, limb);
+            float atmosphereWeight = (.09 + .86 * shellSunFacing)
+              * (.28 + .72 * limbWeight);
             scattered *= clamp(atmosphereWeight, 0.0, 1.0);
             float luminance = dot(scattered, vec3(.2126, .7152, .0722));
             float alpha = clamp(1.0 - exp(-luminance * 7.0 * uIntensity), 0.0, .64);
@@ -2628,14 +2632,15 @@
       const pathSunZ = THREE.MathUtils.lerp(-5.8, -.2, solarTravel);
       // 终态把太阳移到地球背侧的左后缘；盘面由地球本体自然遮挡，光照仍来自同一太阳。
       const occult = smooth(FINAL_OCCULT_START, FINAL_OCCULT_END, t);
-      sun.group.position.x = THREE.MathUtils.lerp(pathSunX, earthRoot.position.x - 2.65, occult);
-      sun.group.position.y = THREE.MathUtils.lerp(pathSunY, earthRoot.position.y + .02, occult);
-      sun.group.position.z = THREE.MathUtils.lerp(pathSunZ, earthRoot.position.z - .9, occult);
+      sunOrbitDirection.set(
+        pathSunX - earthRoot.position.x,
+        pathSunY - earthRoot.position.y,
+        pathSunZ - earthRoot.position.z
+      ).normalize();
+      sunOrbitDirection.lerp(terminalSunDirection, occult).normalize();
+      sun.group.position.copy(earthRoot.position).addScaledVector(sunOrbitDirection, SUN_DISTANCE);
       sun.group.scale.setScalar(.88 + dissolve*.12);
-      // 地球遮挡太阳时只衰减可见盘面，保留背光散射与真实光源方向。
-      sun.halo.material.opacity = THREE.MathUtils.lerp(.95, .18, occult);
-      sun.streak.material.opacity = THREE.MathUtils.lerp(.50, .08, occult);
-      visualSunDirection.copy(sun.group.position).sub(earthRoot.position).normalize();
+      visualSunDirection.copy(sunOrbitDirection);
       // 表面主光始终来自画面中的太阳，而不是固定在地球左侧。
       key.position.copy(earthRoot.position).addScaledVector(visualSunDirection, 12);
       debris.group.position.x = -approach*.75;
