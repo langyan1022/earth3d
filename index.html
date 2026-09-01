@@ -46,6 +46,149 @@
     #curtain { z-index: 8; background: #010309; opacity: 1; transition: opacity .12s linear; }
     #flash { z-index: 4; opacity: 0; background: radial-gradient(circle at 50% 52%, rgba(180,239,255,.28), transparent 44%); }
 
+    #stationCallout {
+      position: fixed;
+      inset: 0;
+      z-index: 6;
+      pointer-events: none;
+      visibility: hidden;
+      opacity: 0;
+      color: var(--cyan);
+      transition: opacity .18s ease, visibility 0s linear .86s;
+    }
+    #stationCallout.is-visible {
+      visibility: visible;
+      opacity: 1;
+      transition-delay: 0s;
+    }
+    #stationCalloutSvg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      color: rgba(143, 232, 255, .82);
+      filter: drop-shadow(0 0 5px rgba(71, 205, 245, .48));
+    }
+    .station-callout-line {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1;
+      stroke-linecap: square;
+      stroke-linejoin: bevel;
+      stroke-dasharray: 4000;
+      stroke-dashoffset: 4000;
+      transition: stroke-dashoffset .38s cubic-bezier(.22, .72, .26, 1);
+    }
+    #stationCallout.is-visible .station-callout-line { stroke-dashoffset: 0; }
+    .station-callout-node,
+    .station-callout-node-halo {
+      transform-box: fill-box;
+      transform-origin: center;
+      opacity: 0;
+      transition: opacity .12s ease .12s;
+    }
+    .station-callout-node { fill: #d9f8ff; }
+    .station-callout-node-halo {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1;
+      stroke-dasharray: 2 3;
+    }
+    #stationCallout.is-visible .station-callout-node,
+    #stationCallout.is-visible .station-callout-node-halo { opacity: 1; }
+    .station-callout-panel {
+      position: absolute;
+      width: min(286px, calc(100vw - 32px));
+      min-height: 154px;
+      padding: 14px 16px 13px;
+      overflow: hidden;
+      background:
+        linear-gradient(115deg, rgba(12, 57, 75, .86), rgba(2, 14, 25, .94) 58%),
+        repeating-linear-gradient(0deg, rgba(108, 224, 249, .035) 0 1px, transparent 1px 5px);
+      border: 1px solid rgba(100, 224, 250, .72);
+      clip-path: polygon(0 11px, 11px 0, calc(100% - 16px) 0, 100% 16px, 100% calc(100% - 11px), calc(100% - 11px) 100%, 13px 100%, 0 calc(100% - 13px));
+      box-shadow: inset 0 0 22px rgba(53, 197, 235, .08), 0 0 18px rgba(18, 144, 181, .18);
+      opacity: 0;
+      transform: translateX(-12px) scale(.965);
+      transform-origin: right center;
+      transition: opacity .28s ease .42s, transform .42s cubic-bezier(.22, .72, .26, 1) .42s;
+    }
+    #stationCallout.is-visible .station-callout-panel {
+      opacity: 1;
+      transform: none;
+    }
+    .station-callout-panel::before,
+    .station-callout-panel::after {
+      content: "";
+      position: absolute;
+      pointer-events: none;
+    }
+    .station-callout-panel::before {
+      inset: 7px;
+      border: 1px solid rgba(90, 214, 244, .2);
+      clip-path: polygon(0 8px, 8px 0, calc(100% - 11px) 0, 100% 11px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 9px 100%, 0 calc(100% - 10px));
+    }
+    .station-callout-panel::after {
+      top: 8px;
+      right: 22px;
+      width: 42px;
+      height: 3px;
+      background: repeating-linear-gradient(90deg, var(--cyan) 0 3px, transparent 3px 6px);
+      opacity: .7;
+    }
+    .station-callout-kicker,
+    .station-callout-meta {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: rgba(166, 230, 247, .68);
+      font: 9px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .station-callout-status { color: var(--cyan); }
+    .station-callout-title {
+      position: relative;
+      z-index: 1;
+      margin: 12px 0 3px;
+      color: #e5faff;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: .1em;
+      text-shadow: 0 0 9px rgba(114, 221, 250, .38);
+    }
+    .station-callout-subtitle {
+      position: relative;
+      z-index: 1;
+      color: rgba(147, 216, 237, .58);
+      font: 9px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: .09em;
+    }
+    .station-callout-rule {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 1px;
+      margin: 11px 0 9px;
+      background: linear-gradient(90deg, rgba(143, 232, 255, .65), rgba(143, 232, 255, .08) 72%, transparent);
+    }
+    .station-callout-copy {
+      position: relative;
+      z-index: 1;
+      max-width: 238px;
+      margin: 0;
+      color: rgba(202, 237, 247, .78);
+      font-size: 11px;
+      line-height: 1.65;
+      letter-spacing: .04em;
+    }
+    .station-callout-meta { margin-top: 10px; color: rgba(156, 218, 236, .54); }
+    .station-callout-meta strong { color: var(--cyan); font-weight: 500; }
+
     #cockpitHud {
       position: fixed;
       inset: 0;
@@ -379,6 +522,13 @@
       70% { opacity: .32; }
       82%, 100% { transform: translateX(146px); opacity: 0; }
     }
+    @media (prefers-reduced-motion: reduce) {
+      #stationCallout { transition-duration: .01ms !important; transition-delay: 0s !important; }
+      .station-callout-line,
+      .station-callout-node,
+      .station-callout-node-halo,
+      .station-callout-panel { transition-duration: .01ms !important; transition-delay: 0s !important; }
+    }
     @media (max-width: 640px) {
       .top-right { display: none; }
       .controls { bottom: max(12px, env(safe-area-inset-bottom)); padding: 10px; }
@@ -396,6 +546,8 @@
       .ueg-brand { left: 28px; top: 28px; transform: scale(.82); transform-origin: left top; }
       .bsc-brand { right: 28px; top: 29px; transform: scale(.78); transform-origin: right top; }
       .navigator-brand { right: 28px; bottom: 27px; transform: scale(.78); transform-origin: right bottom; }
+      .station-callout-panel { min-height: 148px; padding: 13px 14px 12px; }
+      .station-callout-title { font-size: 16px; }
     }
   </style>
 </head>
@@ -1975,6 +2127,22 @@
     </div>
   </div>
 
+  <aside id="stationCallout" aria-hidden="true">
+    <svg id="stationCalloutSvg" aria-hidden="true" focusable="false">
+      <path class="station-callout-line" id="stationCalloutLine" d="M0 0" />
+      <circle class="station-callout-node-halo" id="stationCalloutHalo" r="7" cx="0" cy="0" />
+      <circle class="station-callout-node" id="stationCalloutNode" r="2.2" cx="0" cy="0" />
+    </svg>
+    <section class="station-callout-panel" id="stationCalloutPanel" role="status" aria-live="polite">
+      <div class="station-callout-kicker"><span class="station-callout-status">LINK / ONLINE</span><span>REC. 021</span></div>
+      <h2 class="station-callout-title">领航员空间站</h2>
+      <div class="station-callout-subtitle">NAVIGATOR / INTERNATIONAL STATION</div>
+      <div class="station-callout-rule"></div>
+      <p class="station-callout-copy">《流浪地球2》中的人类轨道中枢，承担全球通信、信息存储与导航支持。</p>
+      <div class="station-callout-meta"><span>目标识别</span><strong>LOCKED</strong></div>
+    </section>
+  </aside>
+
   <div class="controls" role="group" aria-label="动画控制">
     <div class="control-row">
       <button class="primary" id="play" type="button">暂停</button>
@@ -2253,6 +2421,13 @@
     // 移除前景石块：避免近景运动被误读为从地球表面喷出的碎片。
     debris.group.visible = false;
     const navigatorStation = addNavigatorStation();
+    const stationCallout = $('stationCallout');
+    const stationCalloutSvg = $('stationCalloutSvg');
+    const stationCalloutLine = $('stationCalloutLine');
+    const stationCalloutPanel = $('stationCalloutPanel');
+    const stationCalloutNode = $('stationCalloutNode');
+    const stationCalloutHalo = $('stationCalloutHalo');
+    const stationScreen = new THREE.Vector3();
     const starField = addStars();
     const smoke = addOrbitalSmoke();
     const exhaustWisps = addExhaustWisps();
@@ -2295,15 +2470,81 @@
     let yawOffset = 0, pitchOffset = 0, zoomOffset = 0;
     let yawVelocity = 0, pitchVelocity = 0;
     let userUntil = 0;
+    let stationPointerInside = false, stationPointerX = 0, stationPointerY = 0;
+    let stationHovered = false;
+
+    function setStationHovered(next) {
+      if (stationHovered === next) return;
+      stationHovered = next;
+      stationCallout.classList.toggle('is-visible', next);
+      stationCallout.setAttribute('aria-hidden', String(!next));
+    }
+
+    function updateStationPointer(e) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      stationPointerX = e.clientX;
+      stationPointerY = e.clientY;
+      stationPointerInside = e.pointerType !== 'touch'
+        && e.clientX >= rect.left && e.clientX <= rect.right
+        && e.clientY >= rect.top && e.clientY <= rect.bottom;
+    }
+
+    function positionStationCallout(stationX, stationY) {
+      const panelWidth = stationCalloutPanel.offsetWidth;
+      const panelHeight = stationCalloutPanel.offsetHeight;
+      const margin = 16;
+      const gap = 44;
+      let panelOnLeft = stationX > innerWidth * .54;
+      let left = panelOnLeft ? stationX - panelWidth - gap : stationX + gap;
+      if (left < margin) { panelOnLeft = false; left = stationX + gap; }
+      if (left + panelWidth > innerWidth - margin) { panelOnLeft = true; left = stationX - panelWidth - gap; }
+      left = THREE.MathUtils.clamp(left, margin, innerWidth - panelWidth - margin);
+      const top = THREE.MathUtils.clamp(stationY - panelHeight * .34, margin, innerHeight - panelHeight - margin);
+      const anchorX = panelOnLeft ? left + panelWidth : left;
+      const anchorY = top + 28;
+      const elbowX = stationX + (panelOnLeft ? -24 : 24);
+      const bridgeX = anchorX + (panelOnLeft ? 20 : -20);
+
+      stationCalloutPanel.style.left = `${left.toFixed(1)}px`;
+      stationCalloutPanel.style.top = `${top.toFixed(1)}px`;
+      stationCalloutPanel.style.transformOrigin = `${panelOnLeft ? 'right' : 'left'} center`;
+      stationCalloutSvg.setAttribute('viewBox', `0 0 ${innerWidth} ${innerHeight}`);
+      stationCalloutLine.setAttribute('d', `M${stationX.toFixed(1)} ${stationY.toFixed(1)} L${elbowX.toFixed(1)} ${stationY.toFixed(1)} L${bridgeX.toFixed(1)} ${anchorY.toFixed(1)} L${anchorX.toFixed(1)} ${anchorY.toFixed(1)}`);
+      stationCalloutNode.setAttribute('cx', stationX.toFixed(1));
+      stationCalloutNode.setAttribute('cy', stationY.toFixed(1));
+      stationCalloutHalo.setAttribute('cx', stationX.toFixed(1));
+      stationCalloutHalo.setAttribute('cy', stationY.toFixed(1));
+    }
+
+    function updateStationCallout() {
+      if (!navigatorStation.group.visible || !stationPointerInside || drag) {
+        setStationHovered(false);
+        return;
+      }
+      navigatorStation.group.getWorldPosition(stationScreen);
+      stationScreen.project(camera);
+      const stationX = (stationScreen.x * .5 + .5) * innerWidth;
+      const stationY = (-stationScreen.y * .5 + .5) * innerHeight;
+      const onScreen = stationScreen.z >= -1 && stationScreen.z <= 1
+        && stationX >= 0 && stationX <= innerWidth
+        && stationY >= 0 && stationY <= innerHeight;
+      // ponytail: screen-space hotspot keeps this tiny station discoverable; upgrade to raycast plus occlusion if targets become dense.
+      const hitRadius = THREE.MathUtils.clamp(innerWidth * .025, 24, 32);
+      const hovered = onScreen && Math.hypot(stationPointerX - stationX, stationPointerY - stationY) <= hitRadius;
+      if (hovered) positionStationCallout(stationX, stationY);
+      setStationHovered(hovered);
+    }
 
     renderer.domElement.addEventListener('pointerdown', e => {
       if (e.button !== 0) return;
+      updateStationPointer(e);
       drag = true; pointerId = e.pointerId; px = e.clientX; py = e.clientY;
       renderer.domElement.setPointerCapture(e.pointerId);
       userUntil = performance.now() + 8000;
       $('camReadout').textContent = 'MANUAL / ORBIT';
     });
     renderer.domElement.addEventListener('pointermove', e => {
+      updateStationPointer(e);
       if (!drag || e.pointerId !== pointerId) return;
       const dx = e.clientX - px, dy = e.clientY - py; px = e.clientX; py = e.clientY;
       yawVelocity = -dx * .0042; pitchVelocity = -dy * .0035;
@@ -2313,6 +2554,10 @@
     const endDrag = e => { if (e.pointerId === pointerId) { drag = false; pointerId = null; } };
     renderer.domElement.addEventListener('pointerup', endDrag);
     renderer.domElement.addEventListener('pointercancel', endDrag);
+    renderer.domElement.addEventListener('pointerleave', () => {
+      stationPointerInside = false;
+      setStationHovered(false);
+    });
     renderer.domElement.addEventListener('wheel', e => {
       e.preventDefault();
       // 使用相机投影缩放整个 WebGL 场景，保持地球、空间站、星空和尾焰的相对构图不变。
@@ -2454,6 +2699,7 @@
       // 少量较亮星使用独立着色器改变亮度和光斑尺寸，让闪烁在正常观看距离也能被察觉。
       starField.userData.sparkleMaterial.uniforms.uTime.value = t;
       navigatorStation.update(t);
+      updateStationCallout();
 
       const engineStatus = engineSystem.update(t);
       updateSmoke(smoke, t);
