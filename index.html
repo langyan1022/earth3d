@@ -2017,6 +2017,7 @@
     const HORIZONTAL_ALIGN_END = 21.75;
     const IGNITION_START = 14.4;
     const IGNITION_FULL = 19.05;
+    const WAKE_GROWTH_END = 22.2;
     const FINAL_OCCULT_START = 21.75;
     const FINAL_OCCULT_END = 25.15;
     const FINAL_FORM_START = 25.35;
@@ -2043,14 +2044,16 @@
     const earthSpin = new THREE.Group();
     earthRoot.add(earthSpin);
 
-    scene.add(new THREE.HemisphereLight(0x3c5e73, 0x01030a, 0.025));
+    scene.add(new THREE.HemisphereLight(0x3c5e73, 0x01030a, 0.12));
     const key = new THREE.DirectionalLight(0xb9dcff, 2.25);
     key.position.set(-8, .6, -3.5);
     key.target = earthRoot;
     scene.add(key);
     const visualSunDirection = new THREE.Vector3();
+    const visualEngineDirection = new THREE.Vector3(1,0,0);
     const projectedSun = new THREE.Vector3();
     const projectedEarth = new THREE.Vector3();
+    const projectedEngine = new THREE.Vector3();
     const projectedRim = new THREE.Vector3();
     const cameraRightPoint = new THREE.Vector3();
     const rimLight = new THREE.PointLight(0x55d9ff, 11, 18, 2);
@@ -2065,7 +2068,7 @@
       specular: 0x688b9e,
       shininess: 13,
       emissive: 0x01070c,
-      emissiveIntensity: .28
+      emissiveIntensity: .38
     });
     const earth = new THREE.Mesh(new THREE.SphereGeometry(R, 128, 80), earthMaterial);
     earth.receiveShadow = true;
@@ -2133,7 +2136,7 @@
         uniforms: {
           uSolarColor: { value: new THREE.Color(0xd8f4ff) },
           uEngineColor: { value: new THREE.Color(0x238fff) },
-          uPower: { value: 3.8 },
+          uPower: { value: 2.35 },
           uLayer: { value: .56 },
           uIntensity: { value: .72 },
           uSunDirection: { value: new THREE.Vector3(-.88,.07,-.46).normalize() },
@@ -2164,13 +2167,24 @@
           void main(){
             vec3 viewDir = normalize(cameraPosition - vWorldPosition);
             vec3 n = normalize(vWorldNormal);
-            float rim = pow(clamp(1.0 - abs(dot(viewDir, n)), 0.0, 1.0), uPower);
-            float solar = pow(max(dot(n, normalize(uSunDirection)), 0.0), 2.35);
-            float engine = pow(max(dot(n, normalize(uEngineDirection)), 0.0), 4.2) * uEngine;
-            vec3 color = uEngineColor * .009
-              + uSolarColor * solar * 1.18
-              + uEngineColor * engine * .86;
-            gl_FragColor = vec4(color, rim * uIntensity * uLayer);
+            float viewFacing = max(dot(viewDir, n), 0.0);
+            float rim = pow(clamp(1.0 - viewFacing, 0.0, 1.0), uPower);
+            float sunFacing = dot(n, normalize(uSunDirection));
+            float sunLit = smoothstep(-.45, .75, sunFacing);
+            float sunWrap = smoothstep(-.90, .18, sunFacing);
+            float scatter = .76
+              + .18 * sin(vWorldPosition.x*3.7 + vWorldPosition.y*2.1 + vWorldPosition.z*4.1)
+              + .06 * sin(vWorldPosition.x*8.1 - vWorldPosition.z*5.4);
+            float softRim = pow(clamp(1.0 - viewFacing, 0.0, 1.0), 1.15)
+              * (.035 + sunLit*.075);
+            float solarRim = (rim * (.12 + sunLit*.58 + sunWrap*.30) + softRim) * scatter;
+            float engineFacing = max(dot(n, normalize(uEngineDirection)), 0.0);
+            float engine = pow(engineFacing, 4.2) * uEngine;
+            float engineRim = rim * pow(engineFacing, 1.25) * uEngine;
+            float alpha = solarRim + engineRim*.04 + rim*.002;
+            vec3 color = uSolarColor * (.18 + sunLit*.70 + sunWrap*.18 + softRim*.35) * scatter
+              + uEngineColor * (engine*.02 + engineRim*.06);
+            gl_FragColor = vec4(color, alpha * uIntensity * uLayer);
           }
         `
       })
@@ -2324,6 +2338,7 @@
       visualSunDirection.copy(sun.group.position).sub(earthRoot.position).normalize();
       // 表面主光始终来自画面中的太阳，而不是固定在地球左侧。
       key.position.copy(earthRoot.position).addScaledVector(visualSunDirection, 12);
+      rimLight.position.copy(earthRoot.position).addScaledVector(visualSunDirection, 6);
       moon.visible = dissolve > .55;
       moon.position.set(4.15 + wideDrift*.3, -.23, -.15);
       debris.group.position.x = -approach*.75;
@@ -2382,6 +2397,13 @@
       // 第一次转向定位后继续水平左旋；终态保留少量偏航，使赤道环落在十字右侧并保持圆弧透视。
       earthRoot.rotation.y = THREE.MathUtils.degToRad(turnYaw - horizontalAlign * 6);
       earthRoot.rotation.x = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(0, -5, earthTurn));
+      // 推进发动机沿地球局部 +Y 喷出；转向后该方向应落在画面右侧尾流。
+      visualEngineDirection.set(0,1,0).applyQuaternion(earthRoot.quaternion).normalize();
+      projectedEngine.copy(earthRoot.position).addScaledVector(visualEngineDirection, R).project(camera);
+      engineLimb.material.rotation = Math.atan2(
+        projectedEngine.y - projectedEarth.y,
+        projectedEngine.x - projectedEarth.x
+      );
       // 开场先呈现欧亚大陆；转向阶段再连续旋至原片终态，而不是从美洲正面起镜。
       // 最终形态建立后锁定地球本体、夜景和发动机阵列；环境与尾焰仍可持续微动。
       const surfaceSpinTime = Math.min(t, FINAL_FORM_START);
@@ -2395,16 +2417,18 @@
       const finalScatterMotion = finalFormGlow * (
         Math.sin(t*.43) * .034 + Math.sin(t*1.17 + 1.1) * .014
       );
-      const atmosphereIntensity = .20 + occultationGlow*.16 + torqueGlow*.06 + ignitionGlow*.31
-        + solarWrapGlow*.04 + finalFormGlow*.30 + finalScatterMotion;
+      const atmosphereIntensity = .17 + occultationGlow*.13 + torqueGlow*.04 + ignitionGlow*.22
+        + solarWrapGlow*.06 + finalFormGlow*.22 + finalScatterMotion;
       atmosphereLayers.forEach(shell => {
         shell.material.uniforms.uIntensity.value = atmosphereIntensity;
         shell.material.uniforms.uEngine.value = ignitionGlow;
         shell.material.uniforms.uSunDirection.value.copy(visualSunDirection);
+        shell.material.uniforms.uEngineDirection.value.copy(visualEngineDirection);
       });
-      solarLimb.material.opacity = (.1 + occultationGlow*.24) * (.05 + solarVisibility*.95);
-      engineLimb.material.opacity = Math.max(torqueGlow*.18, ignitionGlow*.54);
-      occultationHalo.material.opacity = solarWrapGlow * (.06 + occultationGlow*.08 + ignitionGlow*.035);
+      solarLimb.material.opacity = (.045 + occultationGlow*.11 + solarWrapGlow*.15)
+        * (.38 + solarVisibility*.62);
+      engineLimb.material.opacity = Math.max(torqueGlow*.018, ignitionGlow*.040);
+      occultationHalo.material.opacity = solarWrapGlow * (.012 + occultationGlow*.028 + ignitionGlow*.010);
       // 终态外缘提高亮度，并以非同步周期产生可见但不规则的散射波动。
       const finalHaloFlux = 1 + finalFormGlow * (
         Math.sin(t*.52 + .4) * .25 + Math.sin(t*1.41 + 2.2) * .09
@@ -2412,24 +2436,25 @@
       const finalHaloScale = R * 2.38 * (1 + finalFormGlow * (
         Math.sin(t*.31 + 1.8) * .028 + Math.sin(t*.89) * .010
       ));
-      finalHalo.material.opacity = finalFormGlow * solarWrapGlow * .42 * finalHaloFlux;
+      finalHalo.material.opacity = finalFormGlow * solarWrapGlow * .022 * finalHaloFlux;
       finalHalo.material.rotation = t*.14 + Math.sin(t*.19 + .8)*.05;
       finalHalo.scale.set(finalHaloScale, finalHaloScale, 1);
       const finalHaloDetailFlux = 1 + finalFormGlow * (
         Math.sin(t*.91 + 1.2)*.52 + Math.sin(t*1.83 + .35)*.17
       );
       const finalHaloDetailScale = R * 2.34 * (1 + finalFormGlow*Math.sin(t*.57 + .6)*.016);
-      finalHaloDetail.material.opacity = finalFormGlow * solarWrapGlow * .22 * Math.max(.24, finalHaloDetailFlux);
+      finalHaloDetail.material.opacity = finalFormGlow * solarWrapGlow * .012 * Math.max(.24, finalHaloDetailFlux);
       finalHaloDetail.material.rotation = -t*.19 + Math.sin(t*.33)*.07;
       finalHaloDetail.scale.set(finalHaloDetailScale, finalHaloDetailScale, 1);
       nightMaterial.uniforms.uOpacity.value = .68 + dissolve*.16;
       nightMaterial.uniforms.uSunDirection.value.copy(visualSunDirection);
-      rimLight.intensity = 7 + occultationGlow*12 + ignitionGlow*25;
-      ignitionFill.intensity = ignitionGlow * 6;
+      rimLight.intensity = .22 + occultationGlow*.34 + ignitionGlow*.48;
+      ignitionFill.intensity = ignitionGlow * 3.8;
       // 终态建立后让星空持续定向漂移；四层不同角速度制造轻微视差，表现地球正在前进。
       const finalCruiseTime = Math.max(0, t - FINAL_FORM_START);
-      starField.rotation.y = Math.min(t, FINAL_FORM_START) * .0011 + finalCruiseTime * .0036;
-      starField.rotation.x = Math.sin(t*.11) * .0018 - finalCruiseTime * .00055;
+      // 地球向画面左侧启航时，背景星空反向漂移，产生观察者视角的视差。
+      starField.rotation.y = Math.min(t, FINAL_FORM_START) * .0011 - finalCruiseTime * .0036;
+      starField.rotation.x = Math.sin(t*.11) * .0018 + finalCruiseTime * .00055;
       starField.userData.twinkleLayers.forEach((layer, layerIndex) => {
         const colors = layer.colorAttribute.array;
         for (let i=0; i<layer.count; i++) {
@@ -2446,9 +2471,9 @@
         }
         layer.colorAttribute.needsUpdate = true;
         layer.material.opacity = layer.baseOpacity * (.94 + Math.sin(t*layer.speed + layer.phase)*.06);
-        layer.points.rotation.y = finalCruiseTime * (.00032 + layerIndex * .00022);
+        layer.points.rotation.y = -finalCruiseTime * (.00032 + layerIndex * .00022);
         layer.points.rotation.z = Math.sin(t*.045 + layer.phase) * .0007 * (layerIndex+1)
-          - finalCruiseTime * (.00008 + layerIndex * .000035);
+          + finalCruiseTime * (.00008 + layerIndex * .000035);
       });
       // 少量较亮星使用独立着色器改变亮度和光斑尺寸，让闪烁在正常观看距离也能被察觉。
       starField.userData.sparkleMaterial.uniforms.uTime.value = t;
@@ -2457,10 +2482,11 @@
       const engineStatus = engineSystem.update(t);
       updateSmoke(smoke, t);
       exhaustWisps.update(t);
-      exhaustVolume.position.set(earthRoot.position.x + R + 2.25, earthRoot.position.y, -.22);
+      exhaustVolume.position.set(earthRoot.position.x + R + 3.4, earthRoot.position.y, -.35);
       exhaustVolume.quaternion.copy(camera.quaternion);
       exhaustVolume.material.uniforms.uTime.value = t;
       exhaustVolume.material.uniforms.uOpacity.value = smooth(IGNITION_START, 18.55, t);
+      exhaustVolume.material.uniforms.uGrowth.value = smooth(IGNITION_START, WAKE_GROWTH_END, t);
       updateUi(t, engineStatus, earthTurn);
       renderer.render(scene, camera);
     }
@@ -2477,7 +2503,7 @@
           const ny = (py + .5 - size*.5) / (size*.5);
           const radius = Math.sqrt(nx*nx + ny*ny);
           const direction = omnidirectional ? 1 : Math.max(0, side * nx / Math.max(radius,.001));
-          const haloWidth = (omnidirectional ? .019 : .036) * widthMultiplier;
+          const haloWidth = (omnidirectional ? .022 : .044) * widthMultiplier;
           // 终态全周辉光只保留很薄的内缘，并把能量柔和地散到地球外侧；
           // 避免加色光环压在球面上，形成一圈不透明的蓝色描边。
           const finalSoftHalo = omnidirectional && widthMultiplier > 1;
@@ -2491,7 +2517,7 @@
           const movingScatterTexture = finalSoftHalo
             ? .72 + Math.sin(angle*3 + .7)*.19 + Math.sin(angle*7 - 1.35)*.09
             : 1;
-          const alpha = Math.min(1, radial * angular * movingScatterTexture * (finalSoftHalo ? .48 : .64));
+          const alpha = Math.min(1, radial * angular * movingScatterTexture * (finalSoftHalo ? .42 : .52));
           const i = (py*size+px)*4;
           image.data[i] = image.data[i+1] = image.data[i+2] = 255;
           image.data[i+3] = Math.round(alpha*255);
@@ -2769,12 +2795,12 @@
       const group = new THREE.Group();
       const items = [];
       const pathStart = R + .23;
-      const pathLength = 5.95;
-      // 局部 y 轴在终态转向后对应画面中的前进方向；两侧流线从球缘向尾部收拢。
-      const flowOffset = u => .48
-        + 1.44 * (1 - smooth(.02, .55, u))
-        + Math.sin(u * Math.PI) * .16;
-      for (let i=0;i<58;i++) {
+      const pathLength = 2.7;
+      // 局部 y 轴在终态转向后对应画面中的前进方向；尾流从窄到宽自然散开。
+      const flowOffset = u => .20
+        + .44 * smooth(.04, .92, u)
+        + Math.sin(u * Math.PI) * .06;
+      for (let i=0;i<28;i++) {
         const lane = i % 2 ? 1 : -1;
         const material = new THREE.SpriteMaterial({
           map:texture, color:i%5 ? 0x6ebbe0 : 0xd6f7ff,
@@ -2786,22 +2812,25 @@
         const u = rand();
         const width = 1.8+rand()*5.2, height=.1+rand()*.34;
         const z = (rand()-.5)*3.2;
-        sprite.position.set(-lane * flowOffset(u), pathStart + u * pathLength, z);
+        const spread = .30 + rand()*.80;
+        const center = (rand()-.5)*.24;
+        sprite.position.set(center - lane * spread * flowOffset(u), pathStart + u * pathLength, z);
         sprite.scale.set(width,height,1); group.add(sprite);
         items.push({
-          sprite, material, lane, u, width, height, z,
+          sprite, material, lane, spread, center, u, width, height, z,
           rotation:material.rotation, phase:rand()*8,
-          speed:.05+rand()*.08, max:.08+rand()*.16
+          speed:.05+rand()*.08, max:.020+rand()*.05
         });
       }
       earthSpin.add(group);
       return {
         update(t) {
           const on = smooth(IGNITION_START,18.15,t);
+          const growth = smooth(IGNITION_START,WAKE_GROWTH_END,t);
           items.forEach(item => {
             const u = (item.u + t * item.speed * .22) % 1;
             item.sprite.position.y = pathStart + u * pathLength;
-            item.sprite.position.x = -item.lane * flowOffset(u)
+            item.sprite.position.x = item.center - item.lane * item.spread * flowOffset(u)
               + Math.sin(t*.35+item.phase)*.05
               + Math.sin(t*.09+item.phase)*.025;
             item.sprite.position.z = item.z + Math.sin(t*.17+item.phase)*.09;
@@ -2813,7 +2842,9 @@
               1
             );
             const fade = smooth(.01,.12,u) * (1 - smooth(.82,1,u));
-            item.material.opacity = on*item.max*fade*(.72+Math.sin(t*.7+item.phase)*.22);
+            const growthGate = 1 - smooth(growth-.16, growth+.06, u);
+            item.material.opacity = on*growth*growthGate*item.max*fade
+              *(.72+Math.sin(t*.7+item.phase)*.22);
           });
         }
       };
@@ -2823,18 +2854,21 @@
       const material=new THREE.ShaderMaterial({
         transparent:true, depthWrite:false, depthTest:true,
         blending:THREE.AdditiveBlending, side:THREE.DoubleSide, toneMapped:false,
-        uniforms:{uTime:{value:0},uOpacity:{value:0}},
+        uniforms:{uTime:{value:0},uOpacity:{value:0},uGrowth:{value:0}},
         vertexShader:`
           varying vec2 vUv;
+          uniform float uTime;
           void main(){
             vUv=uv;
             vec3 p=position;
             float x=uv.x;
             float edge=abs(uv.y-.5)*2.0;
             float side=sign(uv.y-.5);
-            float taper=mix(1.12,.64,smoothstep(.0,.72,x));
-            float bend=(1.0-smoothstep(.02,.72,x))*.52+sin(x*3.14159)*.12;
-            p.y=p.y*taper-side*bend*pow(edge,1.35);
+            float taper=mix(.56,.78,smoothstep(.0,.86,x));
+            float bend=(1.0-smoothstep(.02,.76,x))*.12+sin(x*3.14159)*.04;
+            float flutter=sin(x*16.0+uTime*.34)*.025+sin(x*31.0-uTime*.21)*.013;
+            float centerline=sin(x*6.2+uTime*.16)*.020+sin(x*13.0-uTime*.10)*.010;
+            p.y=p.y*taper-side*(bend+flutter)*pow(edge,1.55)+centerline;
             gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.0);
           }
         `,
@@ -2842,6 +2876,7 @@
           varying vec2 vUv;
           uniform float uTime;
           uniform float uOpacity;
+          uniform float uGrowth;
           float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123);}
           float noise(vec2 p){
             vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
@@ -2854,27 +2889,26 @@
           }
           void main(){
             float x=vUv.x, y=abs(vUv.y-.5);
-            float width=mix(.43,.28,x);
-            float body=1.-smoothstep(width*.2,width,y);
+            float width=mix(.24,.38,smoothstep(.0,.92,x));
             float n=fbm(vec2(x*7.5-uTime*.16,vUv.y*19.+sin(x*10.)*.7));
             float filaments=fbm(vec2(x*15.-uTime*.28,vUv.y*42.));
-            float density=body*(.2+.8*smoothstep(.2,.82,n*.78+filaments*.34));
-            float laneOffset=mix(.35,.11,smoothstep(.02,.68,x))+sin(x*3.14159)*.025
-              +sin(uTime*.36+x*9.)*.012;
-            float laneWidth=mix(.026,.015,x);
-            float upperLane=exp(-pow((vUv.y-(.5+laneOffset))/laneWidth,2.));
-            float lowerLane=exp(-pow((vUv.y-(.5-laneOffset))/laneWidth,2.));
-            float lanes=max(upperLane,lowerLane);
-            float gate=smoothstep(.015,.08,x)*pow(1.-x,.68);
-            density=max(density*.72,lanes*(.18+.34*(.55+.45*filaments)));
-            float a=density*gate*uOpacity*.82;
+            float softWidth=width*(.86+.42*n);
+            float body=exp(-pow(y/max(softWidth,.02),1.85));
+            float density=body*(.24+.76*smoothstep(.16,.78,n*.74+filaments*.28))
+              * (.84+.16*filaments);
+            float edgeFade=1.-smoothstep(.35,.49,y);
+            float gate=smoothstep(.005,.12,x) * (1.-smoothstep(.92,1.0,x)*.36);
+            float growthFront=1.-smoothstep(uGrowth-.12,uGrowth+.08,x);
+            float growthNoise=.82+.18*fbm(vec2(x*11.0+uTime*.08,vUv.y*8.0));
+            float growth=smoothstep(0.0,.08,uGrowth)*growthFront*growthNoise;
+            float a=density*edgeFade*gate*growth*uOpacity*1.04;
             vec3 cold=vec3(.12,.42,.73), hot=vec3(.7,.94,1.);
-            vec3 color=mix(cold,hot,clamp(pow(1.-x,2.8)+filaments*.13+lanes*.22,0.,1.));
+            vec3 color=mix(cold,hot,clamp(pow(1.-x,1.8)+filaments*.10,0.,1.));
             gl_FragColor=vec4(color,a);
           }
         `
       });
-      const mesh=new THREE.Mesh(new THREE.PlaneGeometry(7.4,4.4,32,12),material);
+      const mesh=new THREE.Mesh(new THREE.PlaneGeometry(11.5,8.4,48,20),material);
       scene.add(mesh); return mesh;
     }
 
@@ -3282,11 +3316,11 @@
       const rig = new THREE.Group();
       const items = [];
       const pathStart = R - .05;
-      const pathLength = 6.9;
-      const flowOffset = u => .50
-        + 1.36 * (1 - smooth(.02, .58, u))
-        + Math.sin(u * Math.PI) * .13;
-      for (let i = 0; i < 24; i++) {
+      const pathLength = 8.0;
+      const flowOffset = u => .18
+        + 1.55 * smooth(.04, .88, u)
+        + Math.sin(u * Math.PI) * .14;
+      for (let i = 0; i < 30; i++) {
         const lane = i % 2 ? 1 : -1;
         const mat = new THREE.SpriteMaterial({
           map: texture, color: i % 4 ? 0x79acc4 : 0xb3d9e5,
@@ -3297,11 +3331,13 @@
         const sprite = new THREE.Sprite(mat);
         const u = rand();
         const z = -4-rand()*10;
-        const base = new THREE.Vector3(pathStart + u * pathLength, lane * flowOffset(u), z);
+        const spread = .40 + rand()*1.40;
+        const center = (rand()-.5)*.28;
+        const base = new THREE.Vector3(pathStart + u * pathLength, center + lane * spread * flowOffset(u), z);
         const scale = 1.1 + rand()*3.6;
         sprite.position.copy(base); sprite.scale.set(scale*(1.15+u*.7), scale*.72, 1);
         rig.add(sprite);
-        items.push({ sprite, base, lane, u, z, scale, pathLength, flowOffset, speed: .025+rand()*.045, phase: rand()*10, max: .018+rand()*.055 });
+        items.push({ sprite, base, lane, spread, center, u, z, scale, pathLength, flowOffset, speed: .025+rand()*.045, phase: rand()*10, max: .035+rand()*.075 });
       }
       scene.add(rig);
       return { rig, items };
@@ -3309,6 +3345,8 @@
 
     function updateSmoke(smoke, t) {
       const ignition = smooth(IGNITION_START, IGNITION_FULL, t);
+      const growth = smooth(IGNITION_START,WAKE_GROWTH_END,t);
+      smoke.rig.position.set(earthRoot.position.x, earthRoot.position.y, 0);
       smoke.rig.rotation.z = Math.sin(t*.06)*.018;
       smoke.items.forEach(item => {
         const u = (item.u + t * item.speed * .16) % 1;
@@ -3316,13 +3354,14 @@
         item.sprite.position.x = item.base.x + u * item.pathLength
           - item.u * item.pathLength
           + Math.sin(t*.35+item.phase)*.08;
-        item.sprite.position.y = item.lane * item.flowOffset(u)
+        item.sprite.position.y = item.center + item.lane * item.spread * item.flowOffset(u)
           + Math.sin(t*.28+item.phase)*.06;
         item.sprite.position.z = item.z + Math.sin(t*.17+item.phase)*.10;
         item.sprite.material.rotation += .00018 * item.lane;
         item.sprite.scale.set(item.scale*(1.15+u*.7), item.scale*(.72-.12*u), 1);
         const fade = smooth(.01,.12,u) * (1 - smooth(.84,1,u)*.8);
-        item.sprite.material.opacity = item.max * (.26 + ignition*.74) * fade
+        const growthGate = 1 - smooth(growth-.18, growth+.06, u);
+        item.sprite.material.opacity = item.max * ignition * growth * growthGate * fade
           * (0.72 + Math.sin(t*.23+item.phase)*.2);
       });
     }
@@ -3334,13 +3373,13 @@
       for (let i=0; i<26; i++) {
         const y = 20 + rand()*216;
         const grad = x.createLinearGradient(0,0,256,0);
-        const a = .018 + rand()*.036;
+        const a = .028 + rand()*.050;
         grad.addColorStop(0, 'rgba(225,248,255,'+(a*1.5)+')');
         grad.addColorStop(.2, 'rgba(145,220,246,'+a+')');
         grad.addColorStop(.66, 'rgba(75,155,208,'+(a*.48)+')');
         grad.addColorStop(1, 'rgba(45,105,170,0)');
         x.strokeStyle = grad;
-        x.lineWidth = 3 + rand()*13;
+        x.lineWidth = 4 + rand()*16;
         x.filter = 'blur('+(2.5+rand()*5).toFixed(1)+'px)';
         x.beginPath();
         x.moveTo(-16,y);
