@@ -2128,7 +2128,7 @@
     earthSpin.add(nightLights);
 
     const atmosphere = new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.012, 96, 64),
+      new THREE.SphereGeometry(R * 1.028, 96, 64),
       new THREE.ShaderMaterial({
         side: THREE.BackSide,
         transparent: true,
@@ -2137,8 +2137,8 @@
         uniforms: {
           uSolarColor: { value: new THREE.Color(0xd8f4ff) },
           uEngineColor: { value: new THREE.Color(0x238fff) },
-          uPower: { value: 2.35 },
-          uLayer: { value: .56 },
+          uPower: { value: 2.8 },
+          uLayer: { value: .82 },
           uIntensity: { value: .72 },
           uSunDirection: { value: new THREE.Vector3(-.88,.07,-.46).normalize() },
           uEngineDirection: { value: new THREE.Vector3(1,0,0) },
@@ -2171,19 +2171,19 @@
             float viewFacing = max(dot(viewDir, n), 0.0);
             float rim = pow(clamp(1.0 - viewFacing, 0.0, 1.0), uPower);
             float sunFacing = dot(n, normalize(uSunDirection));
-            float sunLit = smoothstep(-.45, .75, sunFacing);
-            float sunWrap = smoothstep(-.90, .18, sunFacing);
-            float scatter = .76
-              + .18 * sin(vWorldPosition.x*3.7 + vWorldPosition.y*2.1 + vWorldPosition.z*4.1)
-              + .06 * sin(vWorldPosition.x*8.1 - vWorldPosition.z*5.4);
-            float softRim = pow(clamp(1.0 - viewFacing, 0.0, 1.0), 1.15)
-              * (.035 + sunLit*.075);
-            float solarRim = (rim * (.12 + sunLit*.58 + sunWrap*.30) + softRim) * scatter;
+            float sunLit = smoothstep(-.22, .56, sunFacing);
+            float sunWrap = smoothstep(-.72, .10, sunFacing);
+            float scatter = .88
+              + .10 * sin(vWorldPosition.x*3.7 + vWorldPosition.y*2.1 + vWorldPosition.z*4.1)
+              + .03 * sin(vWorldPosition.x*8.1 - vWorldPosition.z*5.4);
+            float softRim = pow(clamp(1.0 - viewFacing, 0.0, 1.0), 1.65)
+              * (.012 + sunLit*.055);
+            float solarRim = (rim * (.02 + sunLit*.92 + sunWrap*.12) + softRim) * scatter;
             float engineFacing = max(dot(n, normalize(uEngineDirection)), 0.0);
             float engine = pow(engineFacing, 4.2) * uEngine;
             float engineRim = rim * pow(engineFacing, 1.25) * uEngine;
-            float alpha = solarRim + engineRim*.04 + rim*.002;
-            vec3 color = uSolarColor * (.18 + sunLit*.70 + sunWrap*.18 + softRim*.35) * scatter
+            float alpha = solarRim + engineRim*.025;
+            vec3 color = uSolarColor * (.08 + sunLit*.90 + sunWrap*.06 + softRim*.25) * scatter
               + uEngineColor * (engine*.02 + engineRim*.06);
             gl_FragColor = vec4(color, alpha * uIntensity * uLayer);
           }
@@ -2203,7 +2203,6 @@
     const debris = addDebris();
     // 移除前景石块：避免近景运动被误读为从地球表面喷出的碎片。
     debris.group.visible = false;
-    const moon = addMoon();
     const navigatorStation = addNavigatorStation();
     const starField = addStars();
     const smoke = addOrbitalSmoke();
@@ -2237,12 +2236,6 @@
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
       nightMaterial.uniforms.uMap.value = tex;
-    });
-    loader.load(textureRoot + 'moon_1024.jpg', tex => {
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-      moon.material.map = tex;
-      moon.material.needsUpdate = true;
     });
     setTimeout(() => $('loader').classList.add('done'), 5000);
 
@@ -2340,8 +2333,6 @@
       // 表面主光始终来自画面中的太阳，而不是固定在地球左侧。
       key.position.copy(earthRoot.position).addScaledVector(visualSunDirection, 12);
       rimLight.position.copy(earthRoot.position).addScaledVector(visualSunDirection, 6);
-      moon.visible = dissolve > .55;
-      moon.position.set(4.15 + wideDrift*.3, -.23, -.15);
       debris.group.position.x = -approach*.75;
       debris.group.rotation.y = t*.018;
       debris.material.opacity = .72 - dissolve*.6;
@@ -2426,10 +2417,10 @@
         shell.material.uniforms.uSunDirection.value.copy(visualSunDirection);
         shell.material.uniforms.uEngineDirection.value.copy(visualEngineDirection);
       });
-      solarLimb.material.opacity = (.045 + occultationGlow*.11 + solarWrapGlow*.15)
+      solarLimb.material.opacity = (.015 + occultationGlow*.05 + solarWrapGlow*.06)
         * (.38 + solarVisibility*.62);
-      engineLimb.material.opacity = Math.max(torqueGlow*.018, ignitionGlow*.040);
-      occultationHalo.material.opacity = solarWrapGlow * (.012 + occultationGlow*.028 + ignitionGlow*.010);
+      engineLimb.material.opacity = Math.max(torqueGlow*.010, ignitionGlow*.022);
+      occultationHalo.material.opacity = solarWrapGlow * (.004 + occultationGlow*.008 + ignitionGlow*.004);
       // 终态外缘提高亮度，并以非同步周期产生可见但不规则的散射波动。
       const finalHaloFlux = 1 + finalFormGlow * (
         Math.sin(t*.52 + .4) * .25 + Math.sin(t*1.41 + 2.2) * .09
@@ -2437,14 +2428,14 @@
       const finalHaloScale = R * 2.38 * (1 + finalFormGlow * (
         Math.sin(t*.31 + 1.8) * .028 + Math.sin(t*.89) * .010
       ));
-      finalHalo.material.opacity = finalFormGlow * solarWrapGlow * .022 * finalHaloFlux;
+      finalHalo.material.opacity = finalFormGlow * solarWrapGlow * .006 * finalHaloFlux;
       finalHalo.material.rotation = t*.14 + Math.sin(t*.19 + .8)*.05;
       finalHalo.scale.set(finalHaloScale, finalHaloScale, 1);
       const finalHaloDetailFlux = 1 + finalFormGlow * (
         Math.sin(t*.91 + 1.2)*.52 + Math.sin(t*1.83 + .35)*.17
       );
       const finalHaloDetailScale = R * 2.34 * (1 + finalFormGlow*Math.sin(t*.57 + .6)*.016);
-      finalHaloDetail.material.opacity = finalFormGlow * solarWrapGlow * .012 * Math.max(.24, finalHaloDetailFlux);
+      finalHaloDetail.material.opacity = finalFormGlow * solarWrapGlow * .003 * Math.max(.24, finalHaloDetailFlux);
       finalHaloDetail.material.rotation = -t*.19 + Math.sin(t*.33)*.07;
       finalHaloDetail.scale.set(finalHaloDetailScale, finalHaloDetailScale, 1);
       nightMaterial.uniforms.uOpacity.value = .68 + dissolve*.16;
@@ -2565,18 +2556,6 @@
       streak.scale.set(6.4,.8,1); group.add(streak);
       scene.add(group);
       return { group, halo, streak };
-    }
-
-    function addMoon() {
-      const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(.10, 28, 20),
-        new THREE.MeshStandardMaterial({
-          color:0xb9b0a4, roughness:1, metalness:0,
-          emissive:0x493e33, emissiveIntensity:.55,
-          transparent:true, opacity:.88
-        })
-      );
-      mesh.visible = false; scene.add(mesh); return mesh;
     }
 
     function addNavigatorStation() {
