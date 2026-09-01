@@ -2623,11 +2623,18 @@
       earthRoot.position.y = THREE.MathUtils.lerp(.12, -.02, approach);
       const closeSunX = THREE.MathUtils.lerp(4.4, .62, approach);
       const wideSunX = THREE.MathUtils.lerp(-6.0, -6.35, solarTravel);
-      // 终态太阳位于地球正视方向的左后方；地表和大气共用这一方向。
-      sun.group.position.x = THREE.MathUtils.lerp(closeSunX, wideSunX, earthTurn);
-      sun.group.position.y = THREE.MathUtils.lerp(.12, -.05, dissolve);
-      sun.group.position.z = THREE.MathUtils.lerp(-5.8, -.2, solarTravel);
+      const pathSunX = THREE.MathUtils.lerp(closeSunX, wideSunX, earthTurn);
+      const pathSunY = THREE.MathUtils.lerp(.12, -.05, dissolve);
+      const pathSunZ = THREE.MathUtils.lerp(-5.8, -.2, solarTravel);
+      // 终态把太阳移到地球背侧的左后缘；盘面由地球本体自然遮挡，光照仍来自同一太阳。
+      const occult = smooth(FINAL_OCCULT_START, FINAL_OCCULT_END, t);
+      sun.group.position.x = THREE.MathUtils.lerp(pathSunX, earthRoot.position.x - 2.65, occult);
+      sun.group.position.y = THREE.MathUtils.lerp(pathSunY, earthRoot.position.y + .02, occult);
+      sun.group.position.z = THREE.MathUtils.lerp(pathSunZ, earthRoot.position.z - .9, occult);
       sun.group.scale.setScalar(.88 + dissolve*.12);
+      // 地球遮挡太阳时只衰减可见盘面，保留背光散射与真实光源方向。
+      sun.halo.material.opacity = THREE.MathUtils.lerp(.95, .18, occult);
+      sun.streak.material.opacity = THREE.MathUtils.lerp(.50, .08, occult);
       visualSunDirection.copy(sun.group.position).sub(earthRoot.position).normalize();
       // 表面主光始终来自画面中的太阳，而不是固定在地球左侧。
       key.position.copy(earthRoot.position).addScaledVector(visualSunDirection, 12);
