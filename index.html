@@ -2017,7 +2017,8 @@
     const HORIZONTAL_ALIGN_END = 21.75;
     const IGNITION_START = 14.4;
     const IGNITION_FULL = 19.05;
-    const WAKE_GROWTH_END = 22.2;
+    const WAKE_START = 15.4;
+    const WAKE_GROWTH_END = 23.4;
     const FINAL_OCCULT_START = 21.75;
     const FINAL_OCCULT_END = 25.15;
     const FINAL_FORM_START = 25.35;
@@ -2485,8 +2486,8 @@
       exhaustVolume.position.set(earthRoot.position.x + R + 3.4, earthRoot.position.y, -.35);
       exhaustVolume.quaternion.copy(camera.quaternion);
       exhaustVolume.material.uniforms.uTime.value = t;
-      exhaustVolume.material.uniforms.uOpacity.value = smooth(IGNITION_START, 18.55, t);
-      exhaustVolume.material.uniforms.uGrowth.value = smooth(IGNITION_START, WAKE_GROWTH_END, t);
+      exhaustVolume.material.uniforms.uOpacity.value = smooth(WAKE_START, 19.35, t);
+      exhaustVolume.material.uniforms.uGrowth.value = smooth(WAKE_START, WAKE_GROWTH_END, t);
       updateUi(t, engineStatus, earthTurn);
       renderer.render(scene, camera);
     }
@@ -2797,8 +2798,8 @@
       const pathStart = R + .23;
       const pathLength = 2.7;
       // 局部 y 轴在终态转向后对应画面中的前进方向；尾流从窄到宽自然散开。
-      const flowOffset = u => .20
-        + .44 * smooth(.04, .92, u)
+      const flowOffset = u => .10
+        + .54 * smooth(.04, .92, u)
         + Math.sin(u * Math.PI) * .06;
       for (let i=0;i<28;i++) {
         const lane = i % 2 ? 1 : -1;
@@ -2812,7 +2813,7 @@
         const u = rand();
         const width = 1.8+rand()*5.2, height=.1+rand()*.34;
         const z = (rand()-.5)*3.2;
-        const spread = .30 + rand()*.80;
+        const spread = .20 + rand()*.90;
         const center = (rand()-.5)*.24;
         sprite.position.set(center - lane * spread * flowOffset(u), pathStart + u * pathLength, z);
         sprite.scale.set(width,height,1); group.add(sprite);
@@ -2825,8 +2826,8 @@
       earthSpin.add(group);
       return {
         update(t) {
-          const on = smooth(IGNITION_START,18.15,t);
-          const growth = smooth(IGNITION_START,WAKE_GROWTH_END,t);
+          const on = smooth(WAKE_START,19.0,t);
+          const growth = smooth(WAKE_START,WAKE_GROWTH_END,t);
           items.forEach(item => {
             const u = (item.u + t * item.speed * .22) % 1;
             item.sprite.position.y = pathStart + u * pathLength;
@@ -2889,7 +2890,7 @@
           }
           void main(){
             float x=vUv.x, y=abs(vUv.y-.5);
-            float width=mix(.24,.38,smoothstep(.0,.92,x));
+            float width=mix(.14,.38,smoothstep(.0,.92,x));
             float n=fbm(vec2(x*7.5-uTime*.16,vUv.y*19.+sin(x*10.)*.7));
             float filaments=fbm(vec2(x*15.-uTime*.28,vUv.y*42.));
             float softWidth=width*(.86+.42*n);
@@ -3317,8 +3318,8 @@
       const items = [];
       const pathStart = R - .05;
       const pathLength = 8.0;
-      const flowOffset = u => .18
-        + 1.55 * smooth(.04, .88, u)
+      const flowOffset = u => .10
+        + 1.63 * smooth(.04, .88, u)
         + Math.sin(u * Math.PI) * .14;
       for (let i = 0; i < 30; i++) {
         const lane = i % 2 ? 1 : -1;
@@ -3331,11 +3332,11 @@
         const sprite = new THREE.Sprite(mat);
         const u = rand();
         const z = -4-rand()*10;
-        const spread = .40 + rand()*1.40;
+        const spread = .24 + rand()*1.56;
         const center = (rand()-.5)*.28;
         const base = new THREE.Vector3(pathStart + u * pathLength, center + lane * spread * flowOffset(u), z);
         const scale = 1.1 + rand()*3.6;
-        sprite.position.copy(base); sprite.scale.set(scale*(1.15+u*.7), scale*.72, 1);
+        sprite.position.copy(base); sprite.scale.set(scale*(.72+u*1.13), scale*(.58+u*.02), 1);
         rig.add(sprite);
         items.push({ sprite, base, lane, spread, center, u, z, scale, pathLength, flowOffset, speed: .025+rand()*.045, phase: rand()*10, max: .035+rand()*.075 });
       }
@@ -3344,8 +3345,8 @@
     }
 
     function updateSmoke(smoke, t) {
-      const ignition = smooth(IGNITION_START, IGNITION_FULL, t);
-      const growth = smooth(IGNITION_START,WAKE_GROWTH_END,t);
+      const ignition = smooth(WAKE_START, IGNITION_FULL, t);
+      const growth = smooth(WAKE_START,WAKE_GROWTH_END,t);
       smoke.rig.position.set(earthRoot.position.x, earthRoot.position.y, 0);
       smoke.rig.rotation.z = Math.sin(t*.06)*.018;
       smoke.items.forEach(item => {
@@ -3358,7 +3359,7 @@
           + Math.sin(t*.28+item.phase)*.06;
         item.sprite.position.z = item.z + Math.sin(t*.17+item.phase)*.10;
         item.sprite.material.rotation += .00018 * item.lane;
-        item.sprite.scale.set(item.scale*(1.15+u*.7), item.scale*(.72-.12*u), 1);
+        item.sprite.scale.set(item.scale*(.72+u*1.13), item.scale*(.58+u*.02), 1);
         const fade = smooth(.01,.12,u) * (1 - smooth(.84,1,u)*.8);
         const growthGate = 1 - smooth(growth-.18, growth+.06, u);
         item.sprite.material.opacity = item.max * ignition * growth * growthGate * fade
