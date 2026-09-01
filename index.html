@@ -2403,10 +2403,10 @@
               + betaMie * sumMie * phaseMie;
             // 盘面保留低强度散射，太阳朝向的壳面连续增亮，避免固定一圈假辉光。
             float impact = length(cross(rayOrigin, rayDirection));
-            float limb = smoothstep(uPlanetRadius * .58, uAtmosphereRadius * 1.01, impact);
+            float limb = smoothstep(uPlanetRadius * .48, uAtmosphereRadius * 1.01, impact);
             vec3 shellNormal = normalize(vWorldPosition - uPlanetCenter);
             float shellSunFacing = smoothstep(-.48, .58, dot(shellNormal, sunDirection));
-            float atmosphereWeight = mix(.30, .92, limb)
+            float atmosphereWeight = mix(.36, .86, limb)
               + (1.0 - limb) * shellSunFacing * .24;
             scattered *= clamp(atmosphereWeight, 0.0, 1.0);
             float luminance = dot(scattered, vec3(.2126, .7152, .0722));
