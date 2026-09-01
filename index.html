@@ -2213,9 +2213,9 @@
     const earthSpin = new THREE.Group();
     earthRoot.add(earthSpin);
 
-    // 环境光只留极低的填充，地表亮暗主要由太阳方向决定。
+    // 环境光只留极低填充；单一太阳主光负责把昼夜终止线照出来。
     scene.add(new THREE.HemisphereLight(0x3c5e73, 0x01030a, 0.035));
-    const key = new THREE.DirectionalLight(0xfff1dc, .65);
+    const key = new THREE.DirectionalLight(0xfff1dc, 4.0);
     key.position.set(-8, .6, -3.5);
     key.target = earthRoot;
     scene.add(key);
@@ -2621,11 +2621,11 @@
       earthRoot.position.x = THREE.MathUtils.lerp(THREE.MathUtils.lerp(-1.0, .38, approach), wideEarthX, dissolve);
       earthRoot.position.y = THREE.MathUtils.lerp(.12, -.02, approach);
       const closeSunX = THREE.MathUtils.lerp(4.4, .62, approach);
-      const wideSunX = THREE.MathUtils.lerp(-6.0, -1.35, solarTravel);
-      // 太阳从地球背后向左露出的速度与地球转向完全同步，避免镜头切宽时突然横跳。
+      const wideSunX = THREE.MathUtils.lerp(-6.0, -8.0, solarTravel);
+      // 太阳先从地球背后向左露出，再沿左后方轨迹移动；地表和大气共用这一方向。
       sun.group.position.x = THREE.MathUtils.lerp(closeSunX, wideSunX, earthTurn);
       sun.group.position.y = THREE.MathUtils.lerp(.12, -.05, dissolve);
-      sun.group.position.z = -5.8;
+      sun.group.position.z = THREE.MathUtils.lerp(-5.8, -2.5, solarTravel);
       sun.group.scale.setScalar(.88 + dissolve*.12);
       visualSunDirection.copy(sun.group.position).sub(earthRoot.position).normalize();
       // 表面主光始终来自画面中的太阳，而不是固定在地球左侧。
