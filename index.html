@@ -2285,7 +2285,7 @@
     earthSpin.add(nightLights);
 
     const atmosphere = new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.038, 96, 64),
+      new THREE.SphereGeometry(R * 1.045, 96, 64),
       new THREE.ShaderMaterial({
         side: THREE.FrontSide,
         transparent: true,
@@ -2296,7 +2296,7 @@
         uniforms: {
           uPlanetCenter: { value: new THREE.Vector3() },
           uPlanetRadius: { value: R },
-          uAtmosphereRadius: { value: R * 1.038 },
+          uAtmosphereRadius: { value: R * 1.045 },
           uSolarColor: { value: new THREE.Color(0xbfeaff) },
           uSunDirection: { value: new THREE.Vector3(-.88,.07,-.46).normalize() },
           uIntensity: { value: .88 }
@@ -2346,14 +2346,15 @@
             if(end <= start) discard;
 
             float shellHeight = max(uAtmosphereRadius - uPlanetRadius, .001);
-            float rayleighHeight = shellHeight * .34;
-            float mieHeight = shellHeight * .12;
+            float rayleighHeight = shellHeight * .42;
+            float mieHeight = shellHeight * .16;
             float stepLength = (end - start) / float(VIEW_STEPS);
             vec3 betaRayleigh = vec3(.52, .98, 2.35);
             vec3 betaMie = vec3(.06, .085, .11);
-            float cosTheta = clamp(dot(-rayDirection, sunDirection), -1.0, 1.0);
+            // rayDirection 指向场景，sunDirection 指向太阳；两者同向时是大气的前向散射。
+            float cosTheta = clamp(dot(rayDirection, sunDirection), -1.0, 1.0);
             float phaseRayleigh = 3.0 / (16.0 * PI) * (1.0 + cosTheta * cosTheta);
-            float g = .76;
+            float g = .72;
             float mieDenom = max(1.0 + g*g - 2.0*g*cosTheta, .001);
             float phaseMie = (1.0 - g*g) / (4.0 * PI * pow(mieDenom, 1.5));
             vec3 sumRayleigh = vec3(0.0);
@@ -2400,10 +2401,14 @@
 
             vec3 scattered = betaRayleigh * sumRayleigh * phaseRayleigh
               + betaMie * sumMie * phaseMie;
-            // 穿过地球盘面的视线只显示薄薄的前向雾，能量集中在真实的地平线附近。
+            // 盘面保留低强度散射，太阳朝向的壳面连续增亮，避免固定一圈假辉光。
             float impact = length(cross(rayOrigin, rayDirection));
-            float limb = smoothstep(uPlanetRadius * .78, uPlanetRadius * 1.035, impact);
-            scattered *= mix(.12, 1.0, limb);
+            float limb = smoothstep(uPlanetRadius * .58, uAtmosphereRadius * 1.01, impact);
+            vec3 shellNormal = normalize(vWorldPosition - uPlanetCenter);
+            float shellSunFacing = smoothstep(-.48, .58, dot(shellNormal, sunDirection));
+            float atmosphereWeight = mix(.30, .92, limb)
+              + (1.0 - limb) * shellSunFacing * .24;
+            scattered *= clamp(atmosphereWeight, 0.0, 1.0);
             float luminance = dot(scattered, vec3(.2126, .7152, .0722));
             float alpha = clamp(1.0 - exp(-luminance * 7.0 * uIntensity), 0.0, .62);
             if(alpha < .001) discard;
