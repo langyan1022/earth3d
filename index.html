@@ -2223,7 +2223,8 @@
     scene.add(key);
     const visualSunDirection = new THREE.Vector3();
     const sunOrbitDirection = new THREE.Vector3();
-    const terminalSunDirection = new THREE.Vector3(-.46, .02, -.89).normalize();
+    // 终态太阳保持固定距离的左侧切线方向，正视地球时昼面可见范围接近半球。
+    const terminalSunDirection = new THREE.Vector3(-.97, .02, -.24).normalize();
 
     const earthMaterial = new THREE.MeshPhongMaterial({
       color: 0x213947,
@@ -2617,6 +2618,8 @@
       const solarTravel = smooth(8.1, 17.35, t) * .35
         + smooth(17.35, 23.35, t) * .10
         + smooth(23.35, 25.10, t) * .55;
+      // 地球完成转向后，太阳入射逐步转到侧向，避免正视图只剩窄月牙。
+      const solarSideTravel = smooth(8.1, 16.8, t);
       // 不再把镜头猛推到夜景球壳前；只保留很轻的呼吸式漂移，由地球本身转向揭示发动机。
       const autoRadius = THREE.MathUtils.lerp(11.35, 11.7 - wideDrift*.24, dissolve);
       const autoYaw = -.015 + yawOffset;
@@ -2629,8 +2632,8 @@
       const wideSunX = THREE.MathUtils.lerp(-6.0, -6.35, solarTravel);
       const pathSunX = THREE.MathUtils.lerp(closeSunX, wideSunX, earthTurn);
       const pathSunY = THREE.MathUtils.lerp(.12, -.05, dissolve);
-      const pathSunZ = THREE.MathUtils.lerp(-5.8, -.2, solarTravel);
-      // 终态把太阳移到地球背侧的左后缘；盘面由地球本体自然遮挡，光照仍来自同一太阳。
+      const pathSunZ = THREE.MathUtils.lerp(-5.8, -.2, solarSideTravel);
+      // 终态沿同一固定半径继续过渡；光照始终来自画面中的太阳。
       const occult = smooth(FINAL_OCCULT_START, FINAL_OCCULT_END, t);
       sunOrbitDirection.set(
         pathSunX - earthRoot.position.x,
@@ -2722,8 +2725,8 @@
       const engineStatus = engineSystem.update(t);
       updateSmoke(smoke, t);
       exhaustWisps.update(t);
-      exhaustVolume.position.set(earthRoot.position.x + R + 3.4, earthRoot.position.y, -.35);
-      exhaustVolume.quaternion.copy(camera.quaternion);
+      // 尾流属于地球整体，不再锁定相机朝向；拖拽视角时与地球保持同一姿态。
+      exhaustVolume.position.set(0, R + 3.4, -.35);
       exhaustVolume.material.uniforms.uTime.value = t;
       exhaustVolume.material.uniforms.uOpacity.value = smooth(WAKE_START, 19.35, t);
       exhaustVolume.material.uniforms.uGrowth.value = smooth(WAKE_START, WAKE_GROWTH_END, t);
@@ -3092,7 +3095,9 @@
         `
       });
       const mesh=new THREE.Mesh(new THREE.PlaneGeometry(11.5,8.4,48,20),material);
-      scene.add(mesh); return mesh;
+      // 终态地轴滚转约 −90°；预旋转尾流平面，使前进方向仍沿画面水平轴。
+      mesh.rotation.z = Math.PI / 2;
+      earthRoot.add(mesh); return mesh;
     }
 
     function makeTrailTexture() {
@@ -3522,15 +3527,14 @@
         rig.add(sprite);
         items.push({ sprite, base, lane, spread, center, u, z, scale, pathLength, flowOffset, speed: .025+rand()*.045, phase: rand()*10, max: .035+rand()*.075 });
       }
-      scene.add(rig);
+      earthRoot.add(rig);
       return { rig, items };
     }
 
     function updateSmoke(smoke, t) {
       const ignition = smooth(WAKE_START, IGNITION_FULL, t);
       const growth = smooth(WAKE_START,WAKE_GROWTH_END,t);
-      smoke.rig.position.set(earthRoot.position.x, earthRoot.position.y, 0);
-      smoke.rig.rotation.z = Math.sin(t*.06)*.018;
+      smoke.rig.rotation.z = Math.PI / 2 + Math.sin(t*.06)*.018;
       smoke.items.forEach(item => {
         const u = (item.u + t * item.speed * .16) % 1;
         // 沿两条有限长度的流线循环，避免烟雾逐渐飞出场景或突然跳出画面。
