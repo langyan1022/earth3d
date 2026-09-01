@@ -2214,8 +2214,8 @@
     earthRoot.add(earthSpin);
 
     // 环境光只留极低填充；单一太阳主光负责把昼夜终止线照出来。
-    scene.add(new THREE.HemisphereLight(0x3c5e73, 0x01030a, 0.035));
-    const key = new THREE.DirectionalLight(0xfff1dc, 4.0);
+    scene.add(new THREE.HemisphereLight(0x3c5e73, 0x01030a, 0.12));
+    const key = new THREE.DirectionalLight(0xfff1dc, 6.5);
     key.position.set(-8, .6, -3.5);
     key.target = earthRoot;
     scene.add(key);
@@ -2285,9 +2285,9 @@
     earthSpin.add(nightLights);
 
     const atmosphere = new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.075, 96, 64),
+      new THREE.SphereGeometry(R * 1.10, 96, 64),
       new THREE.ShaderMaterial({
-        side: THREE.FrontSide,
+        side: THREE.DoubleSide,
         transparent: true,
         depthTest: true,
         depthWrite: false,
@@ -2296,10 +2296,10 @@
         uniforms: {
           uPlanetCenter: { value: new THREE.Vector3() },
           uPlanetRadius: { value: R },
-          uAtmosphereRadius: { value: R * 1.075 },
+          uAtmosphereRadius: { value: R * 1.10 },
           uSolarColor: { value: new THREE.Color(0x8fe8ff) },
           uSunDirection: { value: new THREE.Vector3(-.88,.07,-.46).normalize() },
-          uIntensity: { value: .88 }
+          uIntensity: { value: .92 }
         },
         vertexShader: `
           varying vec3 vWorldPosition;
@@ -2346,8 +2346,8 @@
             if(end <= start) discard;
 
             float shellHeight = max(uAtmosphereRadius - uPlanetRadius, .001);
-            float rayleighHeight = shellHeight * .42;
-            float mieHeight = shellHeight * .16;
+            float rayleighHeight = shellHeight * .48;
+            float mieHeight = shellHeight * .18;
             float stepLength = (end - start) / float(VIEW_STEPS);
             vec3 betaRayleigh = vec3(.52, .98, 2.35);
             vec3 betaMie = vec3(.06, .085, .11);
@@ -2382,11 +2382,11 @@
                 lightOpticalMie += exp(-lightHeight / mieHeight) * lightStep;
               }
 
-              // 太阳光线穿过地球本体时，该采样点处于地球阴影中。
+              // 地球本体遮住直射光时保留少量多次散射，避免背光面出现断开的假硬边。
               vec2 shadowHit = raySphere(samplePoint, sunDirection, uPlanetRadius);
               if(shadowHit.x > 0.0){
-                lightOpticalRayleigh = 0.0;
-                lightOpticalMie = 0.0;
+                lightOpticalRayleigh *= .10;
+                lightOpticalMie *= .10;
               }
 
               vec3 transmittance = exp(-(
@@ -2403,14 +2403,15 @@
               + betaMie * sumMie * phaseMie;
             // 盘面保留低强度散射，太阳朝向的壳面连续增亮，避免固定一圈假辉光。
             float impact = length(cross(rayOrigin, rayDirection));
-            float limb = smoothstep(uPlanetRadius * .48, uAtmosphereRadius * 1.01, impact);
+            float limb = smoothstep(uPlanetRadius * .36, uAtmosphereRadius * 1.02, impact);
             vec3 shellNormal = normalize(vWorldPosition - uPlanetCenter);
             float shellSunFacing = smoothstep(-.48, .58, dot(shellNormal, sunDirection));
-            float atmosphereWeight = mix(.36, .86, limb)
-              + (1.0 - limb) * shellSunFacing * .24;
+            float atmosphereWeight = mix(.40, .90, limb)
+              + (1.0 - limb) * shellSunFacing * .24
+              + limb * .08;
             scattered *= clamp(atmosphereWeight, 0.0, 1.0);
             float luminance = dot(scattered, vec3(.2126, .7152, .0722));
-            float alpha = clamp(1.0 - exp(-luminance * 7.0 * uIntensity), 0.0, .62);
+            float alpha = clamp(1.0 - exp(-luminance * 7.0 * uIntensity), 0.0, .64);
             if(alpha < .001) discard;
             vec3 color = scattered * uSolarColor * 5.0 * uIntensity;
             gl_FragColor = vec4(color, alpha);
@@ -2621,11 +2622,11 @@
       earthRoot.position.x = THREE.MathUtils.lerp(THREE.MathUtils.lerp(-1.0, .38, approach), wideEarthX, dissolve);
       earthRoot.position.y = THREE.MathUtils.lerp(.12, -.02, approach);
       const closeSunX = THREE.MathUtils.lerp(4.4, .62, approach);
-      const wideSunX = THREE.MathUtils.lerp(-6.0, -8.0, solarTravel);
-      // 太阳先从地球背后向左露出，再沿左后方轨迹移动；地表和大气共用这一方向。
+      const wideSunX = THREE.MathUtils.lerp(-6.0, -6.35, solarTravel);
+      // 终态太阳位于地球正视方向的左后方；地表和大气共用这一方向。
       sun.group.position.x = THREE.MathUtils.lerp(closeSunX, wideSunX, earthTurn);
       sun.group.position.y = THREE.MathUtils.lerp(.12, -.05, dissolve);
-      sun.group.position.z = THREE.MathUtils.lerp(-5.8, -2.5, solarTravel);
+      sun.group.position.z = THREE.MathUtils.lerp(-5.8, -.2, solarTravel);
       sun.group.scale.setScalar(.88 + dissolve*.12);
       visualSunDirection.copy(sun.group.position).sub(earthRoot.position).normalize();
       // 表面主光始终来自画面中的太阳，而不是固定在地球左侧。
@@ -2670,7 +2671,7 @@
       // 最终形态建立后锁定地球本体、夜景和发动机阵列；环境与尾焰仍可持续微动。
       const surfaceSpinTime = Math.min(t, FINAL_FORM_START);
       earthSpin.rotation.y = THREE.MathUtils.lerp(-2.25, -1.3, earthTurn) + surfaceSpinTime * .014;
-      clouds.rotation.y = t * .006;
+      clouds.rotation.y = Math.min(t, FINAL_FORM_START) * .006;
       // 大气散射只由太阳方向、地球位置和相机射线决定；不再叠加固定环或终态呼吸灯。
       atmosphere.material.uniforms.uPlanetCenter.value.copy(earthRoot.position);
       atmosphere.material.uniforms.uSunDirection.value.copy(visualSunDirection);
