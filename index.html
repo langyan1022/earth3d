@@ -2285,7 +2285,7 @@
     earthSpin.add(nightLights);
 
     const atmosphere = new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.045, 96, 64),
+      new THREE.SphereGeometry(R * 1.075, 96, 64),
       new THREE.ShaderMaterial({
         side: THREE.FrontSide,
         transparent: true,
@@ -2296,7 +2296,7 @@
         uniforms: {
           uPlanetCenter: { value: new THREE.Vector3() },
           uPlanetRadius: { value: R },
-          uAtmosphereRadius: { value: R * 1.045 },
+          uAtmosphereRadius: { value: R * 1.075 },
           uSolarColor: { value: new THREE.Color(0x8fe8ff) },
           uSunDirection: { value: new THREE.Vector3(-.88,.07,-.46).normalize() },
           uIntensity: { value: .88 }
