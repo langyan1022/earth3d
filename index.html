@@ -2223,8 +2223,8 @@
     scene.add(key);
     const visualSunDirection = new THREE.Vector3();
     const sunOrbitDirection = new THREE.Vector3();
-    // 终态太阳保持固定距离的左侧切线方向，正视地球时昼面可见范围接近半球。
-    const terminalSunDirection = new THREE.Vector3(-.97, .02, -.24).normalize();
+    // 终态太阳位于默认观察方向的地球正后方；仍是场景实体，旋转视角即可看到。
+    const terminalSunDirection = new THREE.Vector3(0, -.038, -1).normalize();
 
     const earthMaterial = new THREE.MeshPhongMaterial({
       color: 0x213947,
@@ -2412,7 +2412,8 @@
             vec3 shellNormal = normalize(vWorldPosition - uPlanetCenter);
             float shellSunFacing = smoothstep(-.12, .62, dot(shellNormal, sunDirection));
             float limbWeight = smoothstep(.28, 1.0, limb);
-            float atmosphereWeight = (.09 + .86 * shellSunFacing)
+            float backlight = smoothstep(.72, .985, -dot(normalize(cameraPosition - uPlanetCenter), sunDirection));
+            float atmosphereWeight = (.09 + .86 * shellSunFacing + .72 * backlight * limbWeight)
               * (.28 + .72 * limbWeight);
             scattered *= clamp(atmosphereWeight, 0.0, 1.0);
             float luminance = dot(scattered, vec3(.2126, .7152, .0722));
