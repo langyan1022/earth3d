@@ -3146,25 +3146,37 @@
               float radial=length(vec2(radialY,radialZ));
               float shell=exp(-pow(radial,2.25)*2.35);
               float cloud=smoothstep(.24,.72,n*.74+detail*.32);
-              // 风洞式尾流：中心核、两侧剪切层和沿轴向的速度条带共同形成连续气流。
-              // 轴向变化放慢、横截面变化加快，纹理被拉成长丝而不是一团雾。
-              // 用少量沿轴向弯曲的细丝代替整齐的横向条纹；每条丝在深度方向保留厚度，旋转时仍有视差。
-              float laneWarpY=(n-.5)*.30+sin(p.x*1.32-uTime*.18+n*3.2)*.06;
-              float laneWarpZ=(detail-.5)*.22+cos(p.x*1.06+uTime*.14+detail*2.6)*.05;
+              // 片尾式尾流：大量细丝从近地表的剪切层剥离，各自以不同相位缓慢卷曲。
+              // 丝束在真实 3D 横截面中分布，避免正视时合并成几条规则的粗光带。
+              float laneWarpY=(n-.5)*.14;
+              float laneWarpZ=(detail-.5)*.12;
               vec2 q=vec2(radialY,radialZ);
-              float strandScale=mix(1.18,.70,smoothstep(.16,.95,u));
               float lanes=0.0;
-              lanes+=filamentLine(q,vec2(-.62+laneWarpY*.72,.12+laneWarpZ),vec2(.048,.20)*strandScale);
-              lanes+=filamentLine(q,vec2(-.34+laneWarpY*.46,-.14+laneWarpZ*.74),vec2(.058,.23)*strandScale);
-              lanes+=filamentLine(q,vec2(-.07+laneWarpY*.30,.18-laneWarpZ*.58),vec2(.064,.26)*strandScale);
-              lanes+=filamentLine(q,vec2(.22+laneWarpY*.52,-.10+laneWarpZ*.82),vec2(.058,.22)*strandScale);
-              lanes+=filamentLine(q,vec2(.50+laneWarpY*.78,.14-laneWarpZ*.66),vec2(.045,.18)*strandScale);
-              float nearRoot=1.0-smoothstep(.34,.78,u);
-              lanes+=nearRoot*filamentLine(q,vec2(-.50-laneWarpY*.34,-.30+laneWarpZ*.42),vec2(.040,.16)*strandScale);
-              lanes+=nearRoot*filamentLine(q,vec2(.39-laneWarpY*.28,.31-laneWarpZ*.38),vec2(.040,.15)*strandScale);
-              float edgeRoot=1.0-smoothstep(.18,.64,u);
-              lanes+=edgeRoot*filamentLine(q,vec2(-.78+laneWarpY*.20,.02+laneWarpZ*.30),vec2(.032,.13)*strandScale);
-              lanes+=edgeRoot*filamentLine(q,vec2(.76-laneWarpY*.18,-.04-laneWarpZ*.26),vec2(.032,.12)*strandScale);
+              for(int j=0;j<18;j++){
+                float fj=float(j);
+                float seedA=hash13(vec3(fj+1.0,2.7,8.3));
+                float seedB=hash13(vec3(fj+3.0,7.1,1.9));
+                float seedC=hash13(vec3(fj+5.0,4.6,6.2));
+                float angle=6.2831853*seedB;
+                float radius=mix(.10,.88,sqrt(seedA));
+                vec2 base=vec2(cos(angle),sin(angle))*radius;
+                float phase=6.2831853*seedC;
+                float frequency=mix(2.0,4.4,seedA);
+                vec2 curl=vec2(
+                  sin(u*frequency*6.2831853+phase+n*1.8)
+                    + sin(u*frequency*10.7+phase*.63)*.28,
+                  cos(u*frequency*4.31+phase*1.37-detail*1.6)
+                    + cos(u*frequency*8.4+phase*.81)*.24
+                );
+                vec2 center=base
+                  + curl*mix(.055,.145,seedC)
+                  + vec2(laneWarpY,laneWarpZ)*mix(.24,.52,seedB);
+                float width=mix(.024,.052,hash13(vec3(fj+9.0,3.4,5.1)))
+                  * mix(1.12,.78,smoothstep(.18,1.0,u));
+                float continuity=.56+.44*smoothstep(-.18,.72,
+                  sin(p.x*mix(.72,1.18,seedB)-uTime*.22+phase)+(n-.5)*.9);
+                lanes+=filamentLine(q,center,vec2(width,width*mix(.78,1.24,seedC)))*continuity;
+              }
               float laneNoise=.56+.44*noise3(vec3(
                 p.x*.56-uTime*.24,
                 p.y*.72+p.z*.16,
@@ -3173,11 +3185,11 @@
                 p.x*.88-uTime*.31,
                 p.y*1.45+p.x*.16,
                 p.z*.52)));
-              lanes*=laneNoise*(.78+.22*breakup);
+              lanes*=laneNoise*(.70+.30*breakup);
               float core=exp(-pow(radial/max(mix(.46,.27,u),.02),2.0));
-              float density=shell*(.002+.008*cloud)
-                + lanes*(.72+1.70*laneNoise)
-                + core*.018;
+              float density=shell*(.003+.007*cloud)
+                + lanes*(.90+1.75*laneNoise)
+                + core*.015;
               density*=.80+.20*cloud;
               float edgeFade=1.0-smoothstep(.78,1.02,radial);
               float startFade=smoothstep(.005,.08,u);
@@ -3186,7 +3198,7 @@
               float growth=smoothstep(0.0,.08,uGrowth)*growthFront;
               float sampleAlpha=density*edgeFade*startFade*endFade*growth*uOpacity*stepSize*.96;
               sampleAlpha=clamp(sampleAlpha,0.0,.42);
-              vec3 cold=vec3(.075,.34,.60), hot=vec3(.48,.90,1.);
+              vec3 cold=vec3(.10,.42,.68), hot=vec3(.62,.95,1.);
               vec3 color=mix(cold,hot,clamp(pow(1.0-u,1.7)+detail*.18,0.0,1.0));
               accum+=transmittance*color*sampleAlpha;
               transmittance*=1.0-sampleAlpha;
