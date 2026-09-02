@@ -2456,6 +2456,9 @@
     const smoke = addOrbitalSmoke();
     const exhaustWisps = addExhaustWisps();
     const exhaustVolume = addVolumetricExhaust();
+    // 细丝几何作为主尾流；旧体积雾保留代码但停用，避免形成平面状宽波纹。
+    exhaustVolume.visible = false;
+    const exhaustFilaments = addWakeFilaments();
     const engineSystem = addEngines();
 
     const manager = new THREE.LoadingManager();
@@ -2740,15 +2743,18 @@
       const engineStatus = engineSystem.update(t);
       updateSmoke(smoke, t);
       exhaustWisps.update(t);
+      exhaustFilaments.update(t);
       // 尾流属于地球整体，不再锁定相机朝向；拖拽视角时与地球保持同一姿态。
-      exhaustVolume.position.set(0, R + 3.4, -.35);
-      exhaustVolume.updateMatrixWorld(true);
-      exhaustVolume.userData.localCamera.copy(camera.position);
-      exhaustVolume.worldToLocal(exhaustVolume.userData.localCamera);
-      exhaustVolume.material.uniforms.uCameraLocal.value.copy(exhaustVolume.userData.localCamera);
-      exhaustVolume.material.uniforms.uTime.value = t;
-      exhaustVolume.material.uniforms.uOpacity.value = smooth(WAKE_START, 19.35, t);
-      exhaustVolume.material.uniforms.uGrowth.value = smooth(WAKE_START, WAKE_GROWTH_END, t);
+      if (exhaustVolume.visible) {
+        exhaustVolume.position.set(0, R + 3.4, -.35);
+        exhaustVolume.updateMatrixWorld(true);
+        exhaustVolume.userData.localCamera.copy(camera.position);
+        exhaustVolume.worldToLocal(exhaustVolume.userData.localCamera);
+        exhaustVolume.material.uniforms.uCameraLocal.value.copy(exhaustVolume.userData.localCamera);
+        exhaustVolume.material.uniforms.uTime.value = t;
+        exhaustVolume.material.uniforms.uOpacity.value = smooth(WAKE_START, 19.35, t);
+        exhaustVolume.material.uniforms.uGrowth.value = smooth(WAKE_START, WAKE_GROWTH_END, t);
+      }
       updateUi(t, engineStatus, earthTurn);
       renderer.render(scene, camera);
     }
@@ -3218,6 +3224,103 @@
       return volume;
     }
 
+    function addWakeFilaments() {
+      // 真实 3D 折线尾流：每条丝束独立弯曲并在尾端随机结束，避免几何上形成一张平面。
+      const group = new THREE.Group();
+      group.position.set(0, R + 4.0, -.35);
+      group.rotation.z = Math.PI / 2;
+      earthRoot.add(group);
+
+      const localRand = mulberry32(72419);
+      const glowTexture = makeSoftSquareTexture(true);
+      const paths = [];
+      const pointCount = 44;
+      const rootX = -4.15;
+
+      for (let i = 0; i < 48; i++) {
+        const phase = localRand() * Math.PI * 2;
+        const angle = localRand() * Math.PI * 2;
+        const baseRadius = .42 + Math.sqrt(localRand()) * .54;
+        // 片尾尾流是顺流拉伸的细丝，不是螺旋线框；整段只允许轻微偏转。
+        const frequency = .15 + localRand() * .65;
+        const pathLength = 6.8 + localRand() * 3.2;
+        const points = [];
+        const knotCount = 7;
+        const bendY = [], bendZ = [];
+        for (let k = 0; k < knotCount; k++) {
+          const progress = k / (knotCount - 1);
+          bendY.push((localRand() - .5) * (.06 + progress * .24));
+          bendZ.push((localRand() - .5) * (.05 + progress * .20));
+        }
+
+        for (let j = 0; j < pointCount; j++) {
+          const u = j / (pointCount - 1);
+          const flare = smooth(0, .26, u);
+          const taper = 1 - .68 * smooth(.45, 1, u);
+          const spread = (.86 + 1.52 * flare) * taper;
+          const drift = u * frequency;
+          const knot = Math.min(knotCount - 2, Math.floor(u * (knotCount - 1)));
+          const knotT = u * (knotCount - 1) - knot;
+          const knotEase = knotT * knotT * (3 - 2 * knotT);
+          const bendOffsetY = THREE.MathUtils.lerp(bendY[knot], bendY[knot + 1], knotEase);
+          const bendOffsetZ = THREE.MathUtils.lerp(bendZ[knot], bendZ[knot + 1], knotEase);
+          const localAngle = angle + drift
+            + Math.sin(u * 3.1 + phase) * .08;
+          const radial = baseRadius * spread;
+          const weaveY = Math.sin(u * (4.2 + frequency * 2.0) + phase * .73) * (.025 + u * .06);
+          const weaveZ = Math.cos(u * (3.6 + frequency * 1.6) + phase * .91) * (.022 + u * .055);
+          const y = Math.cos(localAngle) * radial + bendOffsetY + weaveY;
+          const z = Math.sin(localAngle) * radial + bendOffsetZ + weaveZ;
+          points.push(new THREE.Vector3(rootX + u * pathLength, y, z));
+        }
+
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const colors = new Float32Array(pointCount * 3);
+        const baseColor = i % 4 === 0 ? [ .90, 1.00, 1.00 ] : [ .50, .88, 1.00 ];
+        for (let j = 0; j < pointCount; j++) {
+          const u = j / (pointCount - 1);
+          const tailFade = 1 - .78 * smooth(.42, 1, u);
+          const shimmer = .88 + Math.sin(j * 1.73 + phase) * .08;
+          colors[j * 3] = baseColor[0] * tailFade * shimmer;
+          colors[j * 3 + 1] = baseColor[1] * tailFade * shimmer;
+          colors[j * 3 + 2] = baseColor[2] * tailFade * shimmer;
+        }
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        const core = new THREE.Line(geometry, new THREE.LineBasicMaterial({
+          color: 0xffffff, vertexColors: true,
+          transparent: true, opacity: 0, depthWrite: false, depthTest: true,
+          blending: THREE.AdditiveBlending, toneMapped: false
+        }));
+        const halo = new THREE.Line(geometry, new THREE.LineBasicMaterial({
+          color: 0x4ebce9,
+          transparent: true, opacity: 0, depthWrite: false, depthTest: true,
+          blending: THREE.AdditiveBlending, toneMapped: false
+        }));
+        const particles = new THREE.Points(geometry, new THREE.PointsMaterial({
+          map: glowTexture, color: 0xffffff, vertexColors: true, size: .18, sizeAttenuation: true,
+          transparent: true, opacity: 0, depthWrite: false, depthTest: true,
+          blending: THREE.AdditiveBlending, fog: false, toneMapped: false
+        }));
+        group.add(halo, particles, core);
+        paths.push({ geometry, core, halo, particles, phase, max: .16 + localRand() * .18 });
+      }
+
+      return {
+        update(t) {
+          const on = smooth(WAKE_START, 19.2, t);
+          const growth = smooth(WAKE_START, WAKE_GROWTH_END, t);
+          const visiblePoints = Math.max(2, Math.floor(pointCount * Math.min(1, growth * 1.18)));
+          paths.forEach(path => {
+            path.geometry.setDrawRange(0, visiblePoints);
+            const flicker = .78 + Math.sin(t * .76 + path.phase) * .16;
+            path.core.material.opacity = on * path.max * flicker;
+            path.halo.material.opacity = on * path.max * .38 * flicker;
+            path.particles.material.opacity = on * path.max * .72 * flicker;
+          });
+        }
+      };
+    }
+
     function makeTrailTexture() {
       const c=document.createElement('canvas'); c.width=512; c.height=128;
       const x=c.getContext('2d');
@@ -3626,7 +3729,7 @@
       const flowOffset = u => .10
         + .86 * smooth(.04, .88, u)
         + Math.sin(u * Math.PI) * .10;
-      for (let i = 0; i < 26; i++) {
+      for (let i = 0; i < 12; i++) {
         const lane = i % 2 ? 1 : -1;
         const mat = new THREE.SpriteMaterial({
           map: texture, color: i % 4 ? 0x79acc4 : 0xb3d9e5,
@@ -3640,10 +3743,10 @@
         const spread = .12 + rand()*.90;
         const center = (rand()-.5)*.28;
         const base = new THREE.Vector3(pathStart + u * pathLength, center + lane * spread * flowOffset(u), z);
-        const scale = .82 + rand()*2.8;
+        const scale = .55 + rand()*1.8;
         sprite.position.copy(base); sprite.scale.set(scale*(.72+u*1.13), scale*(.58+u*.02), 1);
         rig.add(sprite);
-        items.push({ sprite, base, lane, spread, center, u, z, scale, pathLength, flowOffset, speed: .025+rand()*.045, phase: rand()*10, max: .028+rand()*.060 });
+        items.push({ sprite, base, lane, spread, center, u, z, scale, pathLength, flowOffset, speed: .025+rand()*.045, phase: rand()*10, max: .006+rand()*.014 });
       }
       earthRoot.add(rig);
       return { rig, items };
@@ -3675,16 +3778,16 @@
       const c = document.createElement('canvas'); c.width = c.height = 256;
       const x = c.getContext('2d');
       x.globalCompositeOperation = 'lighter';
-      for (let i=0; i<26; i++) {
+      for (let i=0; i<12; i++) {
         const y = 20 + rand()*216;
         const grad = x.createLinearGradient(0,0,256,0);
-        const a = .022 + rand()*.040;
+        const a = .006 + rand()*.014;
         grad.addColorStop(0, 'rgba(225,248,255,'+(a*1.5)+')');
         grad.addColorStop(.2, 'rgba(145,220,246,'+a+')');
         grad.addColorStop(.66, 'rgba(75,155,208,'+(a*.48)+')');
         grad.addColorStop(1, 'rgba(45,105,170,0)');
         x.strokeStyle = grad;
-        x.lineWidth = 2 + rand()*9;
+        x.lineWidth = 1 + rand()*6;
         x.filter = 'blur('+(2.5+rand()*5).toFixed(1)+'px)';
         x.beginPath();
         x.moveTo(-16,y);
