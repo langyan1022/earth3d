@@ -3000,31 +3000,31 @@
       const group = new THREE.Group();
       const items = [];
       const pathStart = R + .23;
-      const pathLength = 5.2;
+      const pathLength = 6.6;
       // 局部 y 轴在终态转向后对应画面中的前进方向；尾流沿轴向自然散开。
       const flowOffset = u => .10
-        + .92 * smooth(.04, .92, u)
+        + .82 * smooth(.04, .92, u)
         + Math.sin(u * Math.PI) * .08;
-      for (let i=0;i<64;i++) {
+      for (let i=0;i<88;i++) {
         const lane = i % 2 ? 1 : -1;
         const material = new THREE.SpriteMaterial({
-          map:texture, color:i%5 ? 0x6ebbe0 : 0xd6f7ff,
+          map:texture, color:i%5 ? 0x79c9ea : 0xe1faff,
           transparent:true, opacity:0, depthWrite:false,
           blending:THREE.AdditiveBlending,
           rotation:(rand()-.5)*.08
         });
         const sprite = new THREE.Sprite(material);
         const u = rand();
-        const width = 2.2+rand()*6.2, height=.10+rand()*.30;
-        const z = (rand()-.5)*4.0;
-        const spread = .28 + rand()*1.20;
+        const width = 1.6+rand()*6.4, height=.07+rand()*.22;
+        const z = (rand()-.5)*3.6;
+        const spread = .20 + rand()*1.02;
         const center = (rand()-.5)*.34;
         sprite.position.set(center - lane * spread * flowOffset(u), pathStart + u * pathLength, z);
         sprite.scale.set(width,height,1); group.add(sprite);
         items.push({
           sprite, material, lane, spread, center, u, width, height, z,
           rotation:material.rotation, phase:rand()*8,
-          speed:.05+rand()*.08, max:.030+rand()*.065
+          speed:.05+rand()*.08, max:.032+rand()*.082
         });
       }
       earthSpin.add(group);
@@ -3060,7 +3060,7 @@
       const geometry = new THREE.BoxGeometry(11.5, 9.8, 8.4, 1, 1, 1);
       const material = new THREE.ShaderMaterial({
         transparent:true, depthWrite:false, depthTest:true,
-        blending:THREE.NormalBlending, side:THREE.BackSide, toneMapped:false,
+        blending:THREE.AdditiveBlending, side:THREE.BackSide, toneMapped:false,
         uniforms:{
           uTime:{value:0}, uOpacity:{value:0}, uGrowth:{value:0},
           uCameraLocal:{value:new THREE.Vector3()}
@@ -3106,6 +3106,10 @@
             }
             return v;
           }
+          float filamentLine(vec2 q, vec2 center, vec2 width){
+            vec2 d=(q-center)/width;
+            return exp(-dot(d,d));
+          }
           void main(){
             vec3 ro=uCameraLocal;
             vec3 rd=normalize(vLocalPosition-ro);
@@ -3127,38 +3131,60 @@
               vec3 p=ro+rd*(enter+fi*stepSize);
               // 盒子的 -X 端靠近地球；参数沿前进方向从地表向外递增。
               float u=clamp((p.x+HALF_X)/(HALF_X*2.0),0.0,1.0);
-              // 尾流从接近地球截面的宽度起步，沿前进方向逐渐扩张，避免像发动机喷嘴。
-              float spread=mix(1.00,3.90,smoothstep(.015,.82,u));
+              // 参考片尾的流体形态：离开球面时先形成短促的颈部，随后展开成束，远端再自然收窄。
+              float flare=smoothstep(.018,.34,u);
+              float downstreamTaper=1.0-.68*smoothstep(.36,1.0,u);
+              float spread=mix(.62,2.10,flare)*downstreamTaper;
               float n=fbm3(vec3(p.x*.62-uTime*.105,p.y*.82+uTime*.018,p.z*1.02-uTime*.032));
               float detail=noise3(vec3(p.x*1.45-uTime*.20,p.y*1.65,p.z*1.85+uTime*.06));
               detail=.64*detail+.36*noise3(vec3(p.x*3.1+uTime*.11,p.y*2.7,p.z*3.4-uTime*.08));
               float turbulence=smoothstep(.05,.88,u);
-              float bendY=(n-.5)*.46*turbulence;
-              float bendZ=(detail-.5)*.30*turbulence;
+              float bendY=(n-.5)*.68*turbulence;
+              float bendZ=(detail-.5)*.44*turbulence;
               float radialY=(p.y-bendY)/max(spread,.02);
               float radialZ=(p.z-bendZ)/max(spread*.76,.02);
               float radial=length(vec2(radialY,radialZ));
-              float shell=exp(-pow(radial,1.25)*1.05);
+              float shell=exp(-pow(radial,2.25)*2.35);
               float cloud=smoothstep(.24,.72,n*.74+detail*.32);
               // 风洞式尾流：中心核、两侧剪切层和沿轴向的速度条带共同形成连续气流。
               // 轴向变化放慢、横截面变化加快，纹理被拉成长丝而不是一团雾。
-              float streamPhase=p.y*4.4+p.z*5.8+p.x*.45-uTime*.42+n*1.6;
-              float stream=pow(smoothstep(.48,.83,.5+.5*sin(streamPhase)),1.45);
-              float filament=pow(smoothstep(.52,.78,noise3(vec3(p.x*.18-uTime*.16,p.y*3.2,p.z*3.8))),1.9);
-              float flowMask=.48*stream+.52*filament;
-              float core=exp(-pow(radial/max(mix(.50,.36,u),.02),2.0));
-              float shearRadius=mix(.78,.62,u);
-              float shear=exp(-pow((radial-shearRadius)/.22,2.0));
-              float density=shell*(.012+.035*cloud)
-                + core*(.13+.88*flowMask)
-                + shear*(.06+.58*flowMask);
-              density*=.78+.22*cloud;
+              // 用少量沿轴向弯曲的细丝代替整齐的横向条纹；每条丝在深度方向保留厚度，旋转时仍有视差。
+              float laneWarpY=(n-.5)*.30+sin(p.x*1.32-uTime*.18+n*3.2)*.06;
+              float laneWarpZ=(detail-.5)*.22+cos(p.x*1.06+uTime*.14+detail*2.6)*.05;
+              vec2 q=vec2(radialY,radialZ);
+              float strandScale=mix(1.18,.70,smoothstep(.16,.95,u));
+              float lanes=0.0;
+              lanes+=filamentLine(q,vec2(-.62+laneWarpY*.72,.12+laneWarpZ),vec2(.048,.20)*strandScale);
+              lanes+=filamentLine(q,vec2(-.34+laneWarpY*.46,-.14+laneWarpZ*.74),vec2(.058,.23)*strandScale);
+              lanes+=filamentLine(q,vec2(-.07+laneWarpY*.30,.18-laneWarpZ*.58),vec2(.064,.26)*strandScale);
+              lanes+=filamentLine(q,vec2(.22+laneWarpY*.52,-.10+laneWarpZ*.82),vec2(.058,.22)*strandScale);
+              lanes+=filamentLine(q,vec2(.50+laneWarpY*.78,.14-laneWarpZ*.66),vec2(.045,.18)*strandScale);
+              float nearRoot=1.0-smoothstep(.34,.78,u);
+              lanes+=nearRoot*filamentLine(q,vec2(-.50-laneWarpY*.34,-.30+laneWarpZ*.42),vec2(.040,.16)*strandScale);
+              lanes+=nearRoot*filamentLine(q,vec2(.39-laneWarpY*.28,.31-laneWarpZ*.38),vec2(.040,.15)*strandScale);
+              float edgeRoot=1.0-smoothstep(.18,.64,u);
+              lanes+=edgeRoot*filamentLine(q,vec2(-.78+laneWarpY*.20,.02+laneWarpZ*.30),vec2(.032,.13)*strandScale);
+              lanes+=edgeRoot*filamentLine(q,vec2(.76-laneWarpY*.18,-.04-laneWarpZ*.26),vec2(.032,.12)*strandScale);
+              float laneNoise=.56+.44*noise3(vec3(
+                p.x*.56-uTime*.24,
+                p.y*.72+p.z*.16,
+                p.z*.28));
+              float breakup=.62+.38*smoothstep(.24,.78,noise3(vec3(
+                p.x*.88-uTime*.31,
+                p.y*1.45+p.x*.16,
+                p.z*.52)));
+              lanes*=laneNoise*(.78+.22*breakup);
+              float core=exp(-pow(radial/max(mix(.46,.27,u),.02),2.0));
+              float density=shell*(.002+.008*cloud)
+                + lanes*(.72+1.70*laneNoise)
+                + core*.018;
+              density*=.80+.20*cloud;
               float edgeFade=1.0-smoothstep(.78,1.02,radial);
               float startFade=smoothstep(.005,.08,u);
-              float endFade=1.0-smoothstep(.91,1.0,u)*.42;
+              float endFade=1.0-smoothstep(.68,1.0,u)*.64;
               float growthFront=1.0-smoothstep(uGrowth-.13,uGrowth+.10,u);
               float growth=smoothstep(0.0,.08,uGrowth)*growthFront;
-              float sampleAlpha=density*edgeFade*startFade*endFade*growth*uOpacity*stepSize*.88;
+              float sampleAlpha=density*edgeFade*startFade*endFade*growth*uOpacity*stepSize*.96;
               sampleAlpha=clamp(sampleAlpha,0.0,.42);
               vec3 cold=vec3(.075,.34,.60), hot=vec3(.48,.90,1.);
               vec3 color=mix(cold,hot,clamp(pow(1.0-u,1.7)+detail*.18,0.0,1.0));
@@ -3187,7 +3213,7 @@
       for(let i=0;i<34;i++) {
         const y=34+rand()*60;
         const grad=x.createLinearGradient(0,0,512,0);
-        const a=.055+rand()*.13;
+        const a=.070+rand()*.15;
         grad.addColorStop(0,'rgba(220,249,255,'+(a*1.4)+')');
         grad.addColorStop(.18,'rgba(130,214,255,'+a+')');
         grad.addColorStop(.62,'rgba(75,160,225,'+(a*.45)+')');
@@ -3584,11 +3610,11 @@
       const rig = new THREE.Group();
       const items = [];
       const pathStart = R - .05;
-      const pathLength = 8.0;
+      const pathLength = 7.2;
       const flowOffset = u => .10
-        + 1.20 * smooth(.04, .88, u)
-        + Math.sin(u * Math.PI) * .14;
-      for (let i = 0; i < 30; i++) {
+        + .86 * smooth(.04, .88, u)
+        + Math.sin(u * Math.PI) * .10;
+      for (let i = 0; i < 26; i++) {
         const lane = i % 2 ? 1 : -1;
         const mat = new THREE.SpriteMaterial({
           map: texture, color: i % 4 ? 0x79acc4 : 0xb3d9e5,
@@ -3598,14 +3624,14 @@
         });
         const sprite = new THREE.Sprite(mat);
         const u = rand();
-        const z = -4-rand()*10;
-        const spread = .20 + rand()*1.30;
+        const z = -3-rand()*8;
+        const spread = .12 + rand()*.90;
         const center = (rand()-.5)*.28;
         const base = new THREE.Vector3(pathStart + u * pathLength, center + lane * spread * flowOffset(u), z);
-        const scale = 1.1 + rand()*3.6;
+        const scale = .82 + rand()*2.8;
         sprite.position.copy(base); sprite.scale.set(scale*(.72+u*1.13), scale*(.58+u*.02), 1);
         rig.add(sprite);
-        items.push({ sprite, base, lane, spread, center, u, z, scale, pathLength, flowOffset, speed: .025+rand()*.045, phase: rand()*10, max: .035+rand()*.075 });
+        items.push({ sprite, base, lane, spread, center, u, z, scale, pathLength, flowOffset, speed: .025+rand()*.045, phase: rand()*10, max: .028+rand()*.060 });
       }
       earthRoot.add(rig);
       return { rig, items };
@@ -3640,13 +3666,13 @@
       for (let i=0; i<26; i++) {
         const y = 20 + rand()*216;
         const grad = x.createLinearGradient(0,0,256,0);
-        const a = .028 + rand()*.050;
+        const a = .022 + rand()*.040;
         grad.addColorStop(0, 'rgba(225,248,255,'+(a*1.5)+')');
         grad.addColorStop(.2, 'rgba(145,220,246,'+a+')');
         grad.addColorStop(.66, 'rgba(75,155,208,'+(a*.48)+')');
         grad.addColorStop(1, 'rgba(45,105,170,0)');
         x.strokeStyle = grad;
-        x.lineWidth = 4 + rand()*16;
+        x.lineWidth = 2 + rand()*9;
         x.filter = 'blur('+(2.5+rand()*5).toFixed(1)+'px)';
         x.beginPath();
         x.moveTo(-16,y);
