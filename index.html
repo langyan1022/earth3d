@@ -3000,12 +3000,12 @@
       const group = new THREE.Group();
       const items = [];
       const pathStart = R + .23;
-      const pathLength = 2.7;
-      // 局部 y 轴在终态转向后对应画面中的前进方向；尾流从窄到宽自然散开。
+      const pathLength = 5.2;
+      // 局部 y 轴在终态转向后对应画面中的前进方向；尾流沿轴向自然散开。
       const flowOffset = u => .10
-        + .54 * smooth(.04, .92, u)
-        + Math.sin(u * Math.PI) * .06;
-      for (let i=0;i<28;i++) {
+        + 1.28 * smooth(.04, .92, u)
+        + Math.sin(u * Math.PI) * .10;
+      for (let i=0;i<64;i++) {
         const lane = i % 2 ? 1 : -1;
         const material = new THREE.SpriteMaterial({
           map:texture, color:i%5 ? 0x6ebbe0 : 0xd6f7ff,
@@ -3015,16 +3015,16 @@
         });
         const sprite = new THREE.Sprite(material);
         const u = rand();
-        const width = 1.8+rand()*5.2, height=.1+rand()*.34;
-        const z = (rand()-.5)*3.2;
-        const spread = .20 + rand()*.90;
-        const center = (rand()-.5)*.24;
+        const width = 2.2+rand()*6.2, height=.10+rand()*.30;
+        const z = (rand()-.5)*4.0;
+        const spread = .38 + rand()*1.55;
+        const center = (rand()-.5)*.34;
         sprite.position.set(center - lane * spread * flowOffset(u), pathStart + u * pathLength, z);
         sprite.scale.set(width,height,1); group.add(sprite);
         items.push({
           sprite, material, lane, spread, center, u, width, height, z,
           rotation:material.rotation, phase:rand()*8,
-          speed:.05+rand()*.08, max:.020+rand()*.05
+          speed:.05+rand()*.08, max:.030+rand()*.065
         });
       }
       earthSpin.add(group);
@@ -3057,7 +3057,7 @@
 
     function addVolumetricExhaust() {
       // 盒内射线步进的 3D 密度场：没有贴片边界，旋转时会产生真实的前后遮挡和视差。
-      const geometry = new THREE.BoxGeometry(11.5, 8.4, 7.2, 1, 1, 1);
+      const geometry = new THREE.BoxGeometry(11.5, 9.8, 8.4, 1, 1, 1);
       const material = new THREE.ShaderMaterial({
         transparent:true, depthWrite:false, depthTest:true,
         blending:THREE.NormalBlending, side:THREE.BackSide, toneMapped:false,
@@ -3079,8 +3079,8 @@
           uniform float uGrowth;
           uniform vec3 uCameraLocal;
           const float HALF_X=5.75;
-          const float HALF_Y=4.20;
-          const float HALF_Z=3.60;
+          const float HALF_Y=4.90;
+          const float HALF_Z=4.20;
           const int STEPS=30;
 
           float hash13(vec3 p){
@@ -3127,8 +3127,8 @@
               vec3 p=ro+rd*(enter+fi*stepSize);
               // 盒子的 -X 端靠近地球；参数沿前进方向从地表向外递增。
               float u=clamp((p.x+HALF_X)/(HALF_X*2.0),0.0,1.0);
-              // 尾流从地球表面窄起，沿前进方向逐渐扩张。
-              float spread=mix(.18,3.82,smoothstep(.015,.84,u));
+              // 尾流从接近地球截面的宽度起步，沿前进方向逐渐扩张，避免像发动机喷嘴。
+              float spread=mix(1.35,5.05,smoothstep(.015,.82,u));
               float n=fbm3(vec3(p.x*.62-uTime*.105,p.y*.82+uTime*.018,p.z*1.02-uTime*.032));
               float detail=noise3(vec3(p.x*1.45-uTime*.20,p.y*1.65,p.z*1.85+uTime*.06));
               detail=.64*detail+.36*noise3(vec3(p.x*3.1+uTime*.11,p.y*2.7,p.z*3.4-uTime*.08));
@@ -3138,9 +3138,21 @@
               float radialY=(p.y-bendY)/max(spread,.02);
               float radialZ=(p.z-bendZ)/max(spread*.76,.02);
               float radial=length(vec2(radialY,radialZ));
-              float shell=exp(-pow(radial,1.55)*1.55);
+              float shell=exp(-pow(radial,1.25)*1.05);
               float cloud=smoothstep(.24,.72,n*.74+detail*.32);
-              float density=shell*(.22+.78*cloud);
+              // 风洞式尾流：中心核、两侧剪切层和沿轴向的速度条带共同形成连续气流。
+              // 轴向变化放慢、横截面变化加快，纹理被拉成长丝而不是一团雾。
+              float streamPhase=p.y*4.4+p.z*5.8+p.x*.45-uTime*.42+n*1.6;
+              float stream=pow(smoothstep(.48,.83,.5+.5*sin(streamPhase)),1.45);
+              float filament=pow(smoothstep(.52,.78,noise3(vec3(p.x*.18-uTime*.16,p.y*3.2,p.z*3.8))),1.9);
+              float flowMask=.48*stream+.52*filament;
+              float core=exp(-pow(radial/max(mix(.50,.36,u),.02),2.0));
+              float shearRadius=mix(.78,.62,u);
+              float shear=exp(-pow((radial-shearRadius)/.22,2.0));
+              float density=shell*(.012+.035*cloud)
+                + core*(.13+.88*flowMask)
+                + shear*(.06+.58*flowMask);
+              density*=.78+.22*cloud;
               float edgeFade=1.0-smoothstep(.78,1.02,radial);
               float startFade=smoothstep(.005,.08,u);
               float endFade=1.0-smoothstep(.91,1.0,u)*.42;
