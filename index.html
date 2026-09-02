@@ -2233,6 +2233,17 @@
       emissive: 0x01070c,
       emissiveIntensity: .38
     });
+    // 用受控 twilight 柔化终止线，让受光半球在远景保持可读；方向仍来自真实太阳。
+    earthMaterial.onBeforeCompile = shader => {
+      const solarPhongChunk = THREE.ShaderChunk.lights_phong_pars_fragment.replace(
+        'float dotNL = saturate( dot( geometryNormal, directLight.direction ) );',
+        'float dotNL = smoothstep( -.45, .35, dot( geometryNormal, directLight.direction ) );'
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <lights_phong_pars_fragment>',
+        solarPhongChunk
+      );
+    };
     const earth = new THREE.Mesh(new THREE.SphereGeometry(R, 128, 80), earthMaterial);
     earth.receiveShadow = true;
     earthSpin.add(earth);
