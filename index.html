@@ -2456,7 +2456,7 @@
     const smoke = addOrbitalSmoke();
     const exhaustWisps = addExhaustWisps();
     const exhaustVolume = addVolumetricExhaust();
-    // 细丝几何作为主尾流；旧体积雾保留代码但停用，避免形成平面状宽波纹。
+    // 交叉薄层与短流丝作为主尾流；旧体积场保持停用，避免形成规则雾带。
     exhaustVolume.visible = false;
     const exhaustFilaments = addWakeFilaments();
     const engineSystem = addEngines();
@@ -3225,125 +3225,225 @@
     }
 
     function addWakeFilaments() {
-      // 真实 3D 折线尾流：每条丝束独立弯曲并在尾端随机结束，避免几何上形成一张平面。
+      // 短流丝组成的 3D 尾迹：没有任何一条线贯穿全程，旋转时也不会显成线框笼。
       const group = new THREE.Group();
       group.position.set(0, R + 4.0, -.35);
       group.rotation.z = Math.PI / 2;
       earthRoot.add(group);
 
       const localRand = mulberry32(72419);
-      const glowTexture = makeSoftSquareTexture(true);
-      const paths = [];
-      const pointCount = 44;
+      const glowCanvas = document.createElement('canvas');
+      glowCanvas.width = glowCanvas.height = 64;
+      const glowContext = glowCanvas.getContext('2d');
+      const glow = glowContext.createRadialGradient(32, 32, 0, 32, 32, 32);
+      glow.addColorStop(0, 'rgba(225,250,255,.72)');
+      glow.addColorStop(.28, 'rgba(130,216,246,.30)');
+      glow.addColorStop(1, 'rgba(55,135,205,0)');
+      glowContext.fillStyle = glow;
+      glowContext.fillRect(0, 0, 64, 64);
+      const glowTexture = new THREE.CanvasTexture(glowCanvas);
+      glowTexture.colorSpace = THREE.SRGBColorSpace;
       const rootX = -4.15;
+      const wakeLength = 8.8;
+      const sheetGeometry = new THREE.PlaneGeometry(wakeLength, 5.2);
+      const sheets = [];
+      for (let i = 0; i < 7; i++) {
+        const material = new THREE.MeshBasicMaterial({
+          map: makeTrailTexture(localRand, .32),
+          color: i % 4 ? 0x78caed : 0xd8f8ff,
+          transparent: true, opacity: 0,
+          depthWrite: false, depthTest: true,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide,
+          toneMapped: false
+        });
+        const sheet = new THREE.Mesh(sheetGeometry, material);
+        sheet.position.set(rootX, (localRand() - .5) * .12, (localRand() - .5) * .12);
+        sheet.rotation.x = i / 7 * Math.PI + (localRand() - .5) * .16;
+        sheet.rotation.z = (localRand() - .5) * .018;
+        sheet.scale.set(.001, .72 + localRand() * .50, 1);
+        group.add(sheet);
+        sheets.push({ sheet, material, phase: localRand() * Math.PI * 2, max: .32 + localRand() * .18 });
+      }
+      const bundles = [];
+      for (let i = 0; i < 15; i++) {
+        bundles.push({
+          angle: i / 15 * Math.PI * 2 + (localRand() - .5) * .30,
+          radius: .48 + localRand() * .46,
+          phase: localRand() * Math.PI * 2,
+          curl: 1.5 + localRand() * 2.4
+        });
+      }
+      const fragments = [];
+      let segmentCount = 0;
+      for (let i = 0; i < 205; i++) {
+        const bundle = bundles[Math.floor(localRand() * bundles.length)];
+        const steps = 2 + Math.floor(localRand() * 4);
+        fragments.push({
+          u: localRand(),
+          angle: bundle.angle + (localRand() - .5) * .18,
+          radius: THREE.MathUtils.clamp(bundle.radius + (localRand() - .5) * .18, .18, 1),
+          phase: bundle.phase + (localRand() - .5) * .34,
+          curl: bundle.curl + (localRand() - .5) * .32,
+          speed: .0025 + localRand() * .006,
+          length: .055 + Math.pow(localRand(), 1.25) * .125,
+          brightness: .38 + localRand() * .62,
+          steps
+        });
+        segmentCount += steps;
+      }
+      const segmentPositions = new Float32Array(segmentCount * 6);
+      const segmentColors = new Float32Array(segmentCount * 6);
+      const segmentGeometry = new THREE.BufferGeometry();
+      segmentGeometry.setAttribute('position', new THREE.BufferAttribute(segmentPositions, 3));
+      segmentGeometry.setAttribute('color', new THREE.BufferAttribute(segmentColors, 3));
+      const segments = new THREE.LineSegments(segmentGeometry, new THREE.LineBasicMaterial({
+        color: 0xffffff, vertexColors: true,
+        transparent: true, opacity: 0, depthWrite: false, depthTest: true,
+        blending: THREE.AdditiveBlending, toneMapped: false
+      }));
+      group.add(segments);
 
-      for (let i = 0; i < 48; i++) {
-        const phase = localRand() * Math.PI * 2;
-        const angle = localRand() * Math.PI * 2;
-        const baseRadius = .42 + Math.sqrt(localRand()) * .54;
-        // 片尾尾流是顺流拉伸的细丝，不是螺旋线框；整段只允许轻微偏转。
-        const frequency = .15 + localRand() * .65;
-        const pathLength = 6.8 + localRand() * 3.2;
-        const points = [];
-        const knotCount = 7;
-        const bendY = [], bendZ = [];
-        for (let k = 0; k < knotCount; k++) {
-          const progress = k / (knotCount - 1);
-          bendY.push((localRand() - .5) * (.06 + progress * .24));
-          bendZ.push((localRand() - .5) * (.05 + progress * .20));
-        }
+      const hazeCount = 980;
+      const hazePositions = new Float32Array(hazeCount * 3);
+      const hazeColors = new Float32Array(hazeCount * 3);
+      const hazeSpecs = [];
+      for (let i = 0; i < hazeCount; i++) {
+        const bundle = bundles[Math.floor(localRand() * bundles.length)];
+        hazeSpecs.push({
+          u: localRand(),
+          angle: bundle.angle + (localRand() - .5) * .30,
+          radius: THREE.MathUtils.clamp(bundle.radius + (localRand() - .5) * .30, .10, 1),
+          phase: bundle.phase + (localRand() - .5) * .52,
+          curl: bundle.curl + (localRand() - .5) * .48,
+          speed: .0016 + localRand() * .0042,
+          brightness: .28 + localRand() * .72
+        });
+      }
+      const hazeGeometry = new THREE.BufferGeometry();
+      hazeGeometry.setAttribute('position', new THREE.BufferAttribute(hazePositions, 3));
+      hazeGeometry.setAttribute('color', new THREE.BufferAttribute(hazeColors, 3));
+      const veil = new THREE.Points(hazeGeometry, new THREE.PointsMaterial({
+        map: glowTexture, color: 0x4f9bc4, vertexColors: true,
+        size: 1.45, sizeAttenuation: true,
+        transparent: true, opacity: 0, depthWrite: false, depthTest: true,
+        blending: THREE.AdditiveBlending, fog: false, toneMapped: false
+      }));
+      const haze = new THREE.Points(hazeGeometry, new THREE.PointsMaterial({
+        map: glowTexture, color: 0x8cdfff, vertexColors: true,
+        size: .54, sizeAttenuation: true,
+        transparent: true, opacity: 0, depthWrite: false, depthTest: true,
+        blending: THREE.AdditiveBlending, fog: false, toneMapped: false
+      }));
+      const sparks = new THREE.Points(hazeGeometry, new THREE.PointsMaterial({
+        map: glowTexture, color: 0xe5fbff, vertexColors: true,
+        size: .075, sizeAttenuation: true,
+        transparent: true, opacity: 0, depthWrite: false, depthTest: true,
+        blending: THREE.AdditiveBlending, fog: false, toneMapped: false
+      }));
+      group.add(veil, haze, sparks);
 
-        for (let j = 0; j < pointCount; j++) {
-          const u = j / (pointCount - 1);
-          const flare = smooth(0, .26, u);
-          const taper = 1 - .68 * smooth(.45, 1, u);
-          const spread = (.86 + 1.52 * flare) * taper;
-          const drift = u * frequency;
-          const knot = Math.min(knotCount - 2, Math.floor(u * (knotCount - 1)));
-          const knotT = u * (knotCount - 1) - knot;
-          const knotEase = knotT * knotT * (3 - 2 * knotT);
-          const bendOffsetY = THREE.MathUtils.lerp(bendY[knot], bendY[knot + 1], knotEase);
-          const bendOffsetZ = THREE.MathUtils.lerp(bendZ[knot], bendZ[knot + 1], knotEase);
-          const localAngle = angle + drift
-            + Math.sin(u * 3.1 + phase) * .08;
-          const radial = baseRadius * spread;
-          const weaveY = Math.sin(u * (4.2 + frequency * 2.0) + phase * .73) * (.025 + u * .06);
-          const weaveZ = Math.cos(u * (3.6 + frequency * 1.6) + phase * .91) * (.022 + u * .055);
-          const y = Math.cos(localAngle) * radial + bendOffsetY + weaveY;
-          const z = Math.sin(localAngle) * radial + bendOffsetZ + weaveZ;
-          points.push(new THREE.Vector3(rootX + u * pathLength, y, z));
-        }
+      function writeFlowPosition(target, offset, spec, u, t) {
+        const open = smooth(.01, .24, u);
+        const close = smooth(.43, 1, u);
+        const spread = 1.14 + .62 * open - .92 * close;
+        const turbulence = .035 + .19 * smooth(.14, 1, u);
+        const angle = spec.angle
+          + Math.sin(u * spec.curl * Math.PI + spec.phase) * (.035 + u * .10)
+          + Math.sin(t * .11 + spec.phase) * .018;
+        const radial = spec.radius * spread;
+        target[offset] = rootX + u * wakeLength;
+        target[offset + 1] = Math.cos(angle) * radial
+          + Math.sin(u * 5.1 + spec.phase * .73 + t * .045) * turbulence;
+        target[offset + 2] = Math.sin(angle) * radial * .84
+          + Math.cos(u * 4.4 + spec.phase * .91 - t * .038) * turbulence * .82;
+      }
 
-        const geometry = new THREE.BufferGeometry().setFromPoints(points);
-        const colors = new Float32Array(pointCount * 3);
-        const baseColor = i % 4 === 0 ? [ .90, 1.00, 1.00 ] : [ .50, .88, 1.00 ];
-        for (let j = 0; j < pointCount; j++) {
-          const u = j / (pointCount - 1);
-          const tailFade = 1 - .78 * smooth(.42, 1, u);
-          const shimmer = .88 + Math.sin(j * 1.73 + phase) * .08;
-          colors[j * 3] = baseColor[0] * tailFade * shimmer;
-          colors[j * 3 + 1] = baseColor[1] * tailFade * shimmer;
-          colors[j * 3 + 2] = baseColor[2] * tailFade * shimmer;
-        }
-        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-        const core = new THREE.Line(geometry, new THREE.LineBasicMaterial({
-          color: 0xffffff, vertexColors: true,
-          transparent: true, opacity: 0, depthWrite: false, depthTest: true,
-          blending: THREE.AdditiveBlending, toneMapped: false
-        }));
-        const halo = new THREE.Line(geometry, new THREE.LineBasicMaterial({
-          color: 0x4ebce9,
-          transparent: true, opacity: 0, depthWrite: false, depthTest: true,
-          blending: THREE.AdditiveBlending, toneMapped: false
-        }));
-        const particles = new THREE.Points(geometry, new THREE.PointsMaterial({
-          map: glowTexture, color: 0xffffff, vertexColors: true, size: .18, sizeAttenuation: true,
-          transparent: true, opacity: 0, depthWrite: false, depthTest: true,
-          blending: THREE.AdditiveBlending, fog: false, toneMapped: false
-        }));
-        group.add(halo, particles, core);
-        paths.push({ geometry, core, halo, particles, phase, max: .16 + localRand() * .18 });
+      function writeColor(target, offset, strength, hot) {
+        target[offset] = strength * (hot ? .90 : .42);
+        target[offset + 1] = strength * (hot ? 1.00 : .82);
+        target[offset + 2] = strength;
       }
 
       return {
         update(t) {
-          const on = smooth(WAKE_START, 19.2, t);
+          const elapsed = Math.max(0, t - WAKE_START);
+          const on = smooth(WAKE_START, 19.4, t);
           const growth = smooth(WAKE_START, WAKE_GROWTH_END, t);
-          const visiblePoints = Math.max(2, Math.floor(pointCount * Math.min(1, growth * 1.18)));
-          paths.forEach(path => {
-            path.geometry.setDrawRange(0, visiblePoints);
-            const flicker = .78 + Math.sin(t * .76 + path.phase) * .16;
-            path.core.material.opacity = on * path.max * flicker;
-            path.halo.material.opacity = on * path.max * .38 * flicker;
-            path.particles.material.opacity = on * path.max * .72 * flicker;
+          sheets.forEach(item => {
+            item.sheet.scale.x = Math.max(.001, growth);
+            item.sheet.position.x = rootX + wakeLength * growth * .5;
+            item.material.opacity = on * growth * item.max
+              * (.84 + Math.sin(t * .19 + item.phase) * .12);
           });
+          let segmentIndex = 0;
+          fragments.forEach((spec, fragmentIndex) => {
+            const baseU = (spec.u + elapsed * spec.speed) % 1;
+            const shimmer = .78 + Math.sin(t * .83 + spec.phase) * .22;
+            for (let j = 0; j < spec.steps; j++) {
+              const startT = j / spec.steps;
+              const endT = (j + 1) / spec.steps;
+              const u = Math.min(1, baseU + spec.length * startT);
+              const endU = Math.min(1, baseU + spec.length * endT);
+              const middleU = (u + endU) * .5;
+              const fade = smooth(.005, .10, middleU) * (1 - smooth(.70, 1, middleU));
+              const growthGate = 1 - smooth(growth - .11, growth + .035, middleU);
+              const strength = spec.brightness * fade * growthGate * shimmer;
+              const startShape = .16 + .84 * Math.sin(Math.PI * startT);
+              const endShape = .16 + .84 * Math.sin(Math.PI * endT);
+              const offset = segmentIndex * 6;
+              writeFlowPosition(segmentPositions, offset, spec, u, t);
+              writeFlowPosition(segmentPositions, offset + 3, spec, endU, t);
+              writeColor(segmentColors, offset, strength * startShape, fragmentIndex % 7 === 0);
+              writeColor(segmentColors, offset + 3, strength * endShape, fragmentIndex % 7 === 0);
+              segmentIndex++;
+            }
+          });
+          hazeSpecs.forEach((spec, i) => {
+            const u = (spec.u + elapsed * spec.speed) % 1;
+            const fade = smooth(.015, .13, u) * (1 - smooth(.62, 1, u));
+            const growthGate = 1 - smooth(growth - .14, growth + .045, u);
+            const strength = spec.brightness * fade * growthGate
+              * (.76 + Math.sin(t * .41 + spec.phase) * .18);
+            const offset = i * 3;
+            writeFlowPosition(hazePositions, offset, spec, u, t);
+            writeColor(hazeColors, offset, strength, i % 11 === 0);
+          });
+          segmentGeometry.attributes.position.needsUpdate = true;
+          segmentGeometry.attributes.color.needsUpdate = true;
+          hazeGeometry.attributes.position.needsUpdate = true;
+          hazeGeometry.attributes.color.needsUpdate = true;
+          segments.material.opacity = on * .12;
+          veil.material.opacity = on * .006;
+          haze.material.opacity = on * .015;
+          sparks.material.opacity = on * .05;
         }
       };
     }
 
-    function makeTrailTexture() {
+    function makeTrailTexture(random = rand, hazeStrength = 1) {
       const c=document.createElement('canvas'); c.width=512; c.height=128;
       const x=c.getContext('2d');
       x.globalCompositeOperation='lighter';
       for(let i=0;i<34;i++) {
-        const y=34+rand()*60;
+        const y=34+random()*60;
         const grad=x.createLinearGradient(0,0,512,0);
-        const a=.070+rand()*.15;
+        const a=.070+random()*.15;
         grad.addColorStop(0,'rgba(220,249,255,'+(a*1.4)+')');
         grad.addColorStop(.18,'rgba(130,214,255,'+a+')');
         grad.addColorStop(.62,'rgba(75,160,225,'+(a*.45)+')');
         grad.addColorStop(1,'rgba(50,120,190,0)');
-        x.strokeStyle=grad; x.lineWidth=.55+rand()*2.2; x.filter='blur('+(rand()*2.2).toFixed(1)+'px)';
+        x.strokeStyle=grad; x.lineWidth=.55+random()*2.2; x.filter='blur('+(random()*2.2).toFixed(1)+'px)';
         x.beginPath(); x.moveTo(-8,y);
-        x.bezierCurveTo(110,y+(rand()-.5)*26,260,y+(rand()-.5)*38,520,y+(rand()-.5)*44);
+        x.bezierCurveTo(110,y+(random()-.5)*26,260,y+(random()-.5)*38,520,y+(random()-.5)*44);
         x.stroke();
       }
       for(let i=0;i<6;i++) {
-        const y=46+rand()*36;
+        const y=46+random()*36;
         const haze=x.createLinearGradient(0,0,512,0);
-        haze.addColorStop(0,'rgba(170,230,255,.11)'); haze.addColorStop(.45,'rgba(85,175,225,.04)'); haze.addColorStop(1,'rgba(50,120,180,0)');
-        x.filter='blur('+(6+rand()*5).toFixed(1)+'px)'; x.strokeStyle=haze; x.lineWidth=8+rand()*13;
-        x.beginPath(); x.moveTo(-12,y); x.bezierCurveTo(130,y+(rand()-.5)*20,310,y+(rand()-.5)*34,530,y+(rand()-.5)*42); x.stroke();
+        haze.addColorStop(0,`rgba(170,230,255,${.11*hazeStrength})`); haze.addColorStop(.45,`rgba(85,175,225,${.04*hazeStrength})`); haze.addColorStop(1,'rgba(50,120,180,0)');
+        x.filter='blur('+(6+random()*5).toFixed(1)+'px)'; x.strokeStyle=haze; x.lineWidth=8+random()*13;
+        x.beginPath(); x.moveTo(-12,y); x.bezierCurveTo(130,y+(random()-.5)*20,310,y+(random()-.5)*34,530,y+(random()-.5)*42); x.stroke();
       }
       const tex=new THREE.CanvasTexture(c); tex.colorSpace=THREE.SRGBColorSpace;
       return tex;
