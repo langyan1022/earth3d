@@ -2739,6 +2739,10 @@
       exhaustWisps.update(t);
       // 尾流属于地球整体，不再锁定相机朝向；拖拽视角时与地球保持同一姿态。
       exhaustVolume.position.set(0, R + 3.4, -.35);
+      exhaustVolume.updateMatrixWorld(true);
+      exhaustVolume.userData.localCamera.copy(camera.position);
+      exhaustVolume.worldToLocal(exhaustVolume.userData.localCamera);
+      exhaustVolume.material.uniforms.uCameraLocal.value.copy(exhaustVolume.userData.localCamera);
       exhaustVolume.material.uniforms.uTime.value = t;
       exhaustVolume.material.uniforms.uOpacity.value = smooth(WAKE_START, 19.35, t);
       exhaustVolume.material.uniforms.uGrowth.value = smooth(WAKE_START, WAKE_GROWTH_END, t);
@@ -3049,67 +3053,116 @@
     }
 
     function addVolumetricExhaust() {
-      const material=new THREE.ShaderMaterial({
+      // 盒内射线步进的 3D 密度场：没有贴片边界，旋转时会产生真实的前后遮挡和视差。
+      const geometry = new THREE.BoxGeometry(11.5, 8.4, 7.2, 1, 1, 1);
+      const material = new THREE.ShaderMaterial({
         transparent:true, depthWrite:false, depthTest:true,
-        blending:THREE.AdditiveBlending, side:THREE.DoubleSide, toneMapped:false,
-        uniforms:{uTime:{value:0},uOpacity:{value:0},uGrowth:{value:0}},
+        blending:THREE.NormalBlending, side:THREE.BackSide, toneMapped:false,
+        uniforms:{
+          uTime:{value:0}, uOpacity:{value:0}, uGrowth:{value:0},
+          uCameraLocal:{value:new THREE.Vector3()}
+        },
         vertexShader:`
-          varying vec2 vUv;
-          uniform float uTime;
+          varying vec3 vLocalPosition;
           void main(){
-            vUv=uv;
-            vec3 p=position;
-            float x=uv.x;
-            float edge=abs(uv.y-.5)*2.0;
-            float side=sign(uv.y-.5);
-            float taper=mix(.56,.78,smoothstep(.0,.86,x));
-            float bend=(1.0-smoothstep(.02,.76,x))*.12+sin(x*3.14159)*.04;
-            float flutter=sin(x*16.0+uTime*.34)*.025+sin(x*31.0-uTime*.21)*.013;
-            float centerline=sin(x*6.2+uTime*.16)*.020+sin(x*13.0-uTime*.10)*.010;
-            p.y=p.y*taper-side*(bend+flutter)*pow(edge,1.55)+centerline;
-            gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.0);
+            vLocalPosition=position;
+            gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);
           }
         `,
         fragmentShader:`
-          varying vec2 vUv;
+          varying vec3 vLocalPosition;
           uniform float uTime;
           uniform float uOpacity;
           uniform float uGrowth;
-          float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123);}
-          float noise(vec2 p){
-            vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
-            return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x),f.y);
+          uniform vec3 uCameraLocal;
+          const float HALF_X=5.75;
+          const float HALF_Y=4.20;
+          const float HALF_Z=3.60;
+          const int STEPS=30;
+
+          float hash13(vec3 p){
+            p=fract(p*.1031);
+            p+=dot(p,p.yzx+33.33);
+            return fract((p.x+p.y)*p.z);
           }
-          float fbm(vec2 p){
-            float v=0.,a=.5;
-            for(int i=0;i<5;i++){v+=a*noise(p);p=p*2.03+vec2(19.1,7.7);a*=.5;}
+          float noise3(vec3 p){
+            vec3 i=floor(p), f=fract(p);
+            f=f*f*(3.0-2.0*f);
+            return mix(
+              mix(mix(hash13(i),hash13(i+vec3(1,0,0)),f.x),
+                  mix(hash13(i+vec3(0,1,0)),hash13(i+vec3(1,1,0)),f.x),f.y),
+              mix(mix(hash13(i+vec3(0,0,1)),hash13(i+vec3(1,0,1)),f.x),
+                  mix(hash13(i+vec3(0,1,1)),hash13(i+vec3(1,1,1)),f.x),f.y),f.z);
+          }
+          float fbm3(vec3 p){
+            float v=0.0, a=.5;
+            for(int i=0;i<3;i++){
+              v+=a*noise3(p);
+              p=p*2.02+vec3(17.3,9.1,5.7);
+              a*=.5;
+            }
             return v;
           }
           void main(){
-            float x=vUv.x, y=abs(vUv.y-.5);
-            float width=mix(.14,.38,smoothstep(.0,.92,x));
-            float n=fbm(vec2(x*7.5-uTime*.16,vUv.y*19.+sin(x*10.)*.7));
-            float filaments=fbm(vec2(x*15.-uTime*.28,vUv.y*42.));
-            float softWidth=width*(.86+.42*n);
-            float body=exp(-pow(y/max(softWidth,.02),1.85));
-            float density=body*(.24+.76*smoothstep(.16,.78,n*.74+filaments*.28))
-              * (.84+.16*filaments);
-            float edgeFade=1.-smoothstep(.35,.49,y);
-            float gate=smoothstep(.005,.12,x) * (1.-smoothstep(.92,1.0,x)*.36);
-            float growthFront=1.-smoothstep(uGrowth-.12,uGrowth+.08,x);
-            float growthNoise=.82+.18*fbm(vec2(x*11.0+uTime*.08,vUv.y*8.0));
-            float growth=smoothstep(0.0,.08,uGrowth)*growthFront*growthNoise;
-            float a=density*edgeFade*gate*growth*uOpacity*1.04;
-            vec3 cold=vec3(.12,.42,.73), hot=vec3(.7,.94,1.);
-            vec3 color=mix(cold,hot,clamp(pow(1.-x,1.8)+filaments*.10,0.,1.));
-            gl_FragColor=vec4(color,a);
+            vec3 ro=uCameraLocal;
+            vec3 rd=normalize(vLocalPosition-ro);
+            // 零分量用正号代替，避免视线恰好平行盒面时把交段算成空集。
+            vec3 invRd=1.0/max(abs(rd),vec3(.0001))*sign(rd+vec3(.000001));
+            vec3 t0=(vec3(-HALF_X,-HALF_Y,-HALF_Z)-ro)*invRd;
+            vec3 t1=(vec3(HALF_X,HALF_Y,HALF_Z)-ro)*invRd;
+            vec3 tMin=min(t0,t1), tMax=max(t0,t1);
+            float enter=max(max(tMin.x,tMin.y),tMin.z);
+            float exit=min(min(tMax.x,tMax.y),tMax.z);
+            enter=max(enter,0.0);
+            if(exit<=enter) discard;
+
+            float stepSize=(exit-enter)/float(STEPS);
+            vec3 accum=vec3(0.0);
+            float transmittance=1.0;
+            for(int i=0;i<STEPS;i++){
+              float fi=float(i)+.5;
+              vec3 p=ro+rd*(enter+fi*stepSize);
+              // 盒子的 -X 端靠近地球；参数沿前进方向从地表向外递增。
+              float u=clamp((p.x+HALF_X)/(HALF_X*2.0),0.0,1.0);
+              // 尾流从地球表面窄起，沿前进方向逐渐扩张。
+              float spread=mix(.18,3.82,smoothstep(.015,.84,u));
+              float n=fbm3(vec3(p.x*.62-uTime*.105,p.y*.82+uTime*.018,p.z*1.02-uTime*.032));
+              float detail=noise3(vec3(p.x*1.45-uTime*.20,p.y*1.65,p.z*1.85+uTime*.06));
+              detail=.64*detail+.36*noise3(vec3(p.x*3.1+uTime*.11,p.y*2.7,p.z*3.4-uTime*.08));
+              float turbulence=smoothstep(.05,.88,u);
+              float bendY=(n-.5)*.46*turbulence;
+              float bendZ=(detail-.5)*.30*turbulence;
+              float radialY=(p.y-bendY)/max(spread,.02);
+              float radialZ=(p.z-bendZ)/max(spread*.76,.02);
+              float radial=length(vec2(radialY,radialZ));
+              float shell=exp(-pow(radial,1.55)*1.55);
+              float cloud=smoothstep(.24,.72,n*.74+detail*.32);
+              float density=shell*(.22+.78*cloud);
+              float edgeFade=1.0-smoothstep(.78,1.02,radial);
+              float startFade=smoothstep(.005,.08,u);
+              float endFade=1.0-smoothstep(.91,1.0,u)*.42;
+              float growthFront=1.0-smoothstep(uGrowth-.13,uGrowth+.10,u);
+              float growth=smoothstep(0.0,.08,uGrowth)*growthFront;
+              float sampleAlpha=density*edgeFade*startFade*endFade*growth*uOpacity*stepSize*.88;
+              sampleAlpha=clamp(sampleAlpha,0.0,.42);
+              vec3 cold=vec3(.075,.34,.60), hot=vec3(.48,.90,1.);
+              vec3 color=mix(cold,hot,clamp(pow(1.0-u,1.7)+detail*.18,0.0,1.0));
+              accum+=transmittance*color*sampleAlpha;
+              transmittance*=1.0-sampleAlpha;
+              if(transmittance<.025) break;
+            }
+            float alpha=1.0-transmittance;
+            if(alpha<.002) discard;
+            gl_FragColor=vec4(accum,alpha);
           }
         `
       });
-      const mesh=new THREE.Mesh(new THREE.PlaneGeometry(11.5,8.4,48,20),material);
-      // 终态地轴滚转约 −90°；预旋转尾流平面，使前进方向仍沿画面水平轴。
-      mesh.rotation.z = Math.PI / 2;
-      earthRoot.add(mesh); return mesh;
+      const volume = new THREE.Mesh(geometry, material);
+      // 终态地轴滚转约 −90°；预旋转体积尾流，使前进方向仍沿画面水平轴。
+      volume.rotation.z = Math.PI / 2;
+      volume.userData.localCamera = new THREE.Vector3();
+      earthRoot.add(volume);
+      return volume;
     }
 
     function makeTrailTexture() {
