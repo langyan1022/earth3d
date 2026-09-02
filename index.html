@@ -2205,6 +2205,7 @@
     scene.background = new THREE.Color(0x010309);
     scene.fog = new THREE.FogExp2(0x010309, 0.006);
     const camera = new THREE.PerspectiveCamera(39, innerWidth / innerHeight, 0.06, 160);
+    const cameraTarget = new THREE.Vector3();
 
     const rand = mulberry32(271828);
     const clock = new THREE.Clock();
@@ -2217,7 +2218,7 @@
 
     // 环境光只留极低填充；单一太阳主光负责把昼夜终止线照出来。
     scene.add(new THREE.HemisphereLight(0x3c5e73, 0x01030a, 0.20));
-    const key = new THREE.DirectionalLight(0xfff1dc, 6.5);
+    const key = new THREE.DirectionalLight(0xfff1dc, 14);
     key.position.set(-8, .6, -3.5);
     key.target = earthRoot;
     scene.add(key);
@@ -2237,7 +2238,7 @@
     earthMaterial.onBeforeCompile = shader => {
       const solarPhongChunk = THREE.ShaderChunk.lights_phong_pars_fragment.replace(
         'float dotNL = saturate( dot( geometryNormal, directLight.direction ) );',
-        'float dotNL = smoothstep( -.45, .35, dot( geometryNormal, directLight.direction ) );'
+        'float dotNL = smoothstep( -.92, .10, dot( geometryNormal, directLight.direction ) );'
       );
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <lights_phong_pars_fragment>',
@@ -2679,12 +2680,14 @@
       const radius = THREE.MathUtils.clamp(autoRadius, 4.15, 15);
       camera.zoom = Math.exp(zoomOffset);
       camera.updateProjectionMatrix();
+      // 相机围绕地球中心取景，太阳和尾流都在同一视图轨道中随左键拖拽产生真实视差。
+      cameraTarget.copy(earthRoot.position);
       camera.position.set(
-        Math.sin(yaw) * Math.cos(pitch) * radius,
-        Math.sin(pitch) * radius,
-        Math.cos(yaw) * Math.cos(pitch) * radius
+        cameraTarget.x + Math.sin(yaw) * Math.cos(pitch) * radius,
+        cameraTarget.y + Math.sin(pitch) * radius,
+        cameraTarget.z + Math.cos(yaw) * Math.cos(pitch) * radius
       );
-      camera.lookAt(0, 0, 0);
+      camera.lookAt(cameraTarget);
       camera.updateMatrixWorld();
 
       earthRoot.rotation.z = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(-23.4, -90, earthTurn));
