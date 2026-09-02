@@ -3003,8 +3003,8 @@
       const pathLength = 5.2;
       // 局部 y 轴在终态转向后对应画面中的前进方向；尾流沿轴向自然散开。
       const flowOffset = u => .10
-        + 1.28 * smooth(.04, .92, u)
-        + Math.sin(u * Math.PI) * .10;
+        + .92 * smooth(.04, .92, u)
+        + Math.sin(u * Math.PI) * .08;
       for (let i=0;i<64;i++) {
         const lane = i % 2 ? 1 : -1;
         const material = new THREE.SpriteMaterial({
@@ -3017,7 +3017,7 @@
         const u = rand();
         const width = 2.2+rand()*6.2, height=.10+rand()*.30;
         const z = (rand()-.5)*4.0;
-        const spread = .38 + rand()*1.55;
+        const spread = .28 + rand()*1.20;
         const center = (rand()-.5)*.34;
         sprite.position.set(center - lane * spread * flowOffset(u), pathStart + u * pathLength, z);
         sprite.scale.set(width,height,1); group.add(sprite);
@@ -3128,7 +3128,7 @@
               // 盒子的 -X 端靠近地球；参数沿前进方向从地表向外递增。
               float u=clamp((p.x+HALF_X)/(HALF_X*2.0),0.0,1.0);
               // 尾流从接近地球截面的宽度起步，沿前进方向逐渐扩张，避免像发动机喷嘴。
-              float spread=mix(1.35,5.05,smoothstep(.015,.82,u));
+              float spread=mix(1.00,3.90,smoothstep(.015,.82,u));
               float n=fbm3(vec3(p.x*.62-uTime*.105,p.y*.82+uTime*.018,p.z*1.02-uTime*.032));
               float detail=noise3(vec3(p.x*1.45-uTime*.20,p.y*1.65,p.z*1.85+uTime*.06));
               detail=.64*detail+.36*noise3(vec3(p.x*3.1+uTime*.11,p.y*2.7,p.z*3.4-uTime*.08));
@@ -3586,7 +3586,7 @@
       const pathStart = R - .05;
       const pathLength = 8.0;
       const flowOffset = u => .10
-        + 1.63 * smooth(.04, .88, u)
+        + 1.20 * smooth(.04, .88, u)
         + Math.sin(u * Math.PI) * .14;
       for (let i = 0; i < 30; i++) {
         const lane = i % 2 ? 1 : -1;
@@ -3599,7 +3599,7 @@
         const sprite = new THREE.Sprite(mat);
         const u = rand();
         const z = -4-rand()*10;
-        const spread = .24 + rand()*1.56;
+        const spread = .20 + rand()*1.30;
         const center = (rand()-.5)*.28;
         const base = new THREE.Vector3(pathStart + u * pathLength, center + lane * spread * flowOffset(u), z);
         const scale = 1.1 + rand()*3.6;
