@@ -447,6 +447,34 @@
     }
     .top-right output { color: rgba(230, 248, 255, .86); }
 
+    .farewell-caption {
+      position: fixed;
+      z-index: 6;
+      left: 24px;
+      right: 24px;
+      bottom: max(92px, 11.5vh, calc(env(safe-area-inset-bottom) + 84px));
+      margin: 0;
+      color: #f2f4f5;
+      font-size: clamp(18px, 2.1vw, 42px);
+      font-weight: 400;
+      line-height: 1.5;
+      letter-spacing: .045em;
+      text-align: center;
+      text-wrap: balance;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, .95);
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    .farewell-caption span { display: block; }
+    .farewell-caption span + span {
+      margin-top: .18em;
+      font-size: .86em;
+      letter-spacing: .03em;
+      color: #e1e7eb;
+    }
+    .farewell-caption :lang(ar), .farewell-caption :lang(hi) { letter-spacing: normal; }
+
     .controls {
       position: fixed;
       z-index: 7;
@@ -464,7 +492,8 @@
       transition: opacity .35s ease, background .35s ease, border-color .35s ease;
     }
     .controls:hover, .controls:focus-within { opacity: .9; background: rgba(2,8,16,.5); border-color: var(--line); }
-    .control-row { display: flex; align-items: center; gap: 9px; }
+    .controls[data-sound-prompt="true"] { opacity: .85; }
+    .control-row { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
     button {
       appearance: none;
       border: 1px solid rgba(171, 225, 255, .2);
@@ -2143,15 +2172,19 @@
     </section>
   </aside>
 
-  <div class="controls" role="group" aria-label="动画控制">
+  <p class="farewell-caption" id="farewellCaption" role="status" aria-live="polite" aria-atomic="true" hidden><span dir="auto"></span><span dir="auto"></span></p>
+  <audio id="farewellAudio" src="./audio/farewell-duet-60s.mp3" preload="auto" aria-hidden="true"></audio>
+
+  <div class="controls" role="group" aria-label="动画控制" data-sound-prompt="true">
     <div class="control-row">
       <button class="primary" id="play" type="button">暂停</button>
       <button id="replay" type="button">重播</button>
       <button id="reset" type="button">导演视角</button>
+      <button id="sound" type="button" aria-pressed="false" title="开启六组双语告别旁白">开启声音</button>
       <div class="status"><span>序列 / </span><strong id="phase">地球转向</strong></div>
     </div>
     <div class="track" id="track" aria-label="动画进度" role="slider" aria-valuemin="0" aria-valuemax="34" aria-valuenow="0" tabindex="0">
-      <i class="tick" style="left:17%"></i><i class="tick hot" style="left:23%"></i><i class="tick hot" style="left:43%"></i><i class="tick" style="left:74%"></i>
+      <i class="tick"></i><i class="tick hot"></i><i class="tick hot"></i><i class="tick"></i>
       <div id="progress"></div>
     </div>
   </div>
@@ -2178,7 +2211,6 @@
         svg.replaceWith(svg.cloneNode(true));
       });
     }, 8000);
-    const DURATION = 34;
     const EARTH_TURN_START = 7.8;
     const EARTH_TURN_END = 14.5;
     const HORIZONTAL_ALIGN_START = 15.0;
@@ -2190,6 +2222,34 @@
     const FINAL_OCCULT_START = 21.75;
     const FINAL_OCCULT_END = 25.15;
     const FINAL_FORM_START = 25.35;
+    const FAREWELL_START = FINAL_FORM_START + 2;
+    const FAREWELL_CUE_DURATION = 5;
+    const FAREWELL_CAPTIONS = [
+      { lang: 'zh-CN', text: '再见，太阳系' },
+      { lang: 'en', text: 'Goodbye, Solar System.' },
+      { lang: 'fr', text: 'Adieu, système solaire.' },
+      { lang: 'de', text: 'Leb wohl, Sonnensystem.' },
+      { lang: 'es', text: 'Adiós, sistema solar.' },
+      { lang: 'pt', text: 'Adeus, Sistema Solar.' },
+      { lang: 'it', text: 'Addio, Sistema Solare.' },
+      { lang: 'ru', text: 'Прощай, Солнечная система.' },
+      { lang: 'ar', text: 'وداعًا، أيتها المجموعة الشمسية.' },
+      { lang: 'hi', text: 'अलविदा, सौर मंडल।' },
+      { lang: 'ko', text: '안녕, 태양계.' },
+      { lang: 'id', text: 'Selamat tinggal, Tata Surya.' }
+    ];
+    const DURATION = 60;
+    const farewellCaption = $('farewellCaption');
+    const farewellLines = farewellCaption.querySelectorAll('span');
+    const farewellAudio = $('farewellAudio');
+    const soundButton = $('sound');
+    let farewellSoundEnabled = false;
+    let farewellAudioStarting = false;
+    $('track').setAttribute('aria-valuemax', String(DURATION));
+    const phaseTimes = [5.8, EARTH_TURN_START, EARTH_TURN_END, FINAL_FORM_START];
+    document.querySelectorAll('#track .tick').forEach((tick, index) => {
+      tick.style.left = `${phaseTimes[index] / DURATION * 100}%`;
+    });
     const R = 2.5;
     // 太阳沿固定半径绕地球运动，避免终态换位时改变相对距离。
     const SUN_DISTANCE = 7.9;
@@ -2632,29 +2692,40 @@
     });
 
     $('play').addEventListener('click', togglePlay);
-    $('replay').addEventListener('click', () => { playhead = 0; playing = true; $('play').textContent = '暂停'; });
+    $('replay').addEventListener('click', replay);
     $('reset').addEventListener('click', resetView);
+    soundButton.addEventListener('click', () => setFarewellSound(!farewellSoundEnabled));
     $('track').addEventListener('pointerdown', e => seekFromPointer(e));
     $('track').addEventListener('keydown', e => {
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         e.preventDefault();
-        playhead = THREE.MathUtils.clamp(playhead + (e.key === 'ArrowRight' ? 1 : -1), 0, DURATION - .01);
+        seekPlayback(THREE.MathUtils.clamp(playhead + (e.key === 'ArrowRight' ? 1 : -1), 0, DURATION - .01));
       }
     });
     addEventListener('keydown', e => {
       if (e.target instanceof HTMLButtonElement) return;
       if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
-      if (e.key.toLowerCase() === 'r') { playhead = 0; playing = true; $('play').textContent = '暂停'; }
+      if (e.key.toLowerCase() === 'r') replay();
       if (e.key === '0') resetView();
     });
     addEventListener('resize', onResize);
+    document.addEventListener('visibilitychange', () => syncFarewellAudio(true));
+    farewellAudio.addEventListener('loadedmetadata', () => syncFarewellAudio(true));
     setTimeout(() => $('hint').style.opacity = '0', 6500);
 
     function animate(now) {
       requestAnimationFrame(animate);
       const dt = Math.min((now - last) / 1000, .05); last = now;
       // 时间轴到终态后继续向前运行：构图保持最终状态，细节动画持续运动，不再自动回到开场。
-      if (playing) playhead += dt;
+      if (playing && !document.hidden) {
+        // Use the media clock while sound is playing, so slow rendering cannot split the two timelines.
+        if (farewellSoundEnabled && !farewellAudio.paused && !farewellAudio.ended && farewellAudio.readyState > 0) {
+          if (!farewellAudio.seeking) playhead = farewellAudio.currentTime;
+        } else {
+          playhead += dt;
+        }
+      }
+      syncFarewellAudio();
       const t = playhead;
 
       // 原片节奏：地球遮住太阳，赤道转向发动机先点亮，随后地球完成转向。
@@ -2736,8 +2807,8 @@
       );
       camera.lookAt(cameraTarget);
       camera.updateMatrixWorld();
-      // 终态平滑转到赤道发动机带居中的机位；拖拽仍绕地球中心旋转。
-      worldGroup.rotation.y = -yawOffset - finalFraming * .19;
+      // 终态略微展开圆环透视，让发动机带在地球中部呈现自然弧度。
+      worldGroup.rotation.y = -yawOffset - finalFraming * .29;
       worldGroup.rotation.x = pitchOffset;
       worldGroup.position.copy(earthRoot.position).sub(
         worldDragPivot.copy(earthRoot.position).applyQuaternion(worldGroup.quaternion)
@@ -3593,7 +3664,25 @@
       return tex;
     }
 
+    function updateFarewellCaption(t) {
+      // Follow the scene playhead so pause, seek and replay keep every fade in sync.
+      const elapsed = t - FAREWELL_START;
+      const cueIndex = Math.floor(elapsed / FAREWELL_CUE_DURATION) * 2;
+      const cue = FAREWELL_CAPTIONS[cueIndex];
+      const cueTime = elapsed % FAREWELL_CUE_DURATION;
+      const opacity = cue ? smooth(0, 1, cueTime) * (1 - smooth(3.6, 4.6, cueTime)) : 0;
+      farewellCaption.hidden = opacity === 0;
+      farewellCaption.style.opacity = opacity.toFixed(3);
+      farewellLines.forEach((line, index) => {
+        const caption = FAREWELL_CAPTIONS[cueIndex + index];
+        const text = opacity > 0 && caption ? caption.text : '';
+        if (line.textContent !== text) line.textContent = text;
+        if (text) line.lang = caption.lang;
+      });
+    }
+
     function updateUi(t, engineStatus, earthTurn) {
+      updateFarewellCaption(t);
       const timelineT = Math.min(t, DURATION);
       $('progress').style.width = (timelineT / DURATION * 100).toFixed(2) + '%';
       $('track').setAttribute('aria-valuenow', timelineT.toFixed(1));
@@ -3627,9 +3716,51 @@
       $('flash').style.opacity = flash.toFixed(3);
     }
 
+    function setFarewellSound(enabled) {
+      farewellSoundEnabled = enabled;
+      soundButton.textContent = enabled ? '关闭声音' : '开启声音';
+      soundButton.setAttribute('aria-pressed', String(enabled));
+      soundButton.title = enabled ? '关闭双语告别旁白' : '开启六组双语告别旁白';
+      document.querySelector('.controls').removeAttribute('data-sound-prompt');
+      syncFarewellAudio(true);
+    }
+
+    function syncFarewellAudio(forceSeek = false) {
+      const shouldPlay = farewellSoundEnabled && playing && !document.hidden && playhead < DURATION;
+      if (forceSeek || (shouldPlay && farewellAudio.paused && !farewellAudioStarting)) {
+        const target = Math.min(playhead, DURATION);
+        if (Math.abs(farewellAudio.currentTime - target) > .01) farewellAudio.currentTime = target;
+      }
+      if (!shouldPlay) {
+        farewellAudio.pause();
+        return;
+      }
+      if (!farewellAudio.paused || farewellAudioStarting) return;
+      farewellAudioStarting = true;
+      farewellAudio.play().catch(error => {
+        if (error.name === 'AbortError') return;
+        setFarewellSound(false);
+        soundButton.textContent = '重试声音';
+        soundButton.title = '语音未能播放，点击重试';
+        document.querySelector('.controls').setAttribute('data-sound-prompt', 'true');
+      }).finally(() => { farewellAudioStarting = false; });
+    }
+
+    function seekPlayback(time) {
+      playhead = time;
+      syncFarewellAudio(true);
+    }
+
+    function replay() {
+      playing = true;
+      seekPlayback(0);
+      $('play').textContent = '暂停';
+    }
+
     function togglePlay() {
       playing = !playing;
       $('play').textContent = playing ? '暂停' : '继续';
+      syncFarewellAudio(true);
     }
     function resetView() {
       yawOffset = pitchOffset = zoomOffset = yawVelocity = pitchVelocity = 0;
@@ -3637,7 +3768,7 @@
     }
     function seekFromPointer(e) {
       const r = $('track').getBoundingClientRect();
-      playhead = THREE.MathUtils.clamp((e.clientX-r.left)/r.width*DURATION, 0, DURATION-.01);
+      seekPlayback(THREE.MathUtils.clamp((e.clientX-r.left)/r.width*DURATION, 0, DURATION-.01));
     }
     function onResize() {
       camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();

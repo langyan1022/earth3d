@@ -1,0 +1,160 @@
+{
+  "duration": 60,
+  "start": 27.35,
+  "cueDuration": 5,
+  "mix": "Both languages start together; first voice slightly left, second slightly right.",
+  "groups": [
+    {
+      "group": 1,
+      "start": 27.35,
+      "end": 32.35,
+      "voices": [
+        {
+          "order": 1,
+          "language": "中文",
+          "locale": "zh-CN",
+          "text": "再见，太阳系。",
+          "voice": "zh-CN-YunyangNeural",
+          "file": "01_zh-CN.mp3",
+          "seconds": 2.04,
+          "rate": "-8%",
+          "pitch": "-4Hz"
+        },
+        {
+          "order": 2,
+          "language": "英语",
+          "locale": "en-US",
+          "text": "Goodbye, Solar System.",
+          "voice": "en-US-JennyNeural",
+          "file": "02_en-US.mp3",
+          "seconds": 2.616
+        }
+      ]
+    },
+    {
+      "group": 2,
+      "start": 32.35,
+      "end": 37.35,
+      "voices": [
+        {
+          "order": 3,
+          "language": "法语",
+          "locale": "fr-FR",
+          "text": "Adieu, système solaire.",
+          "voice": "fr-FR-HenriNeural",
+          "file": "03_fr-FR.mp3",
+          "seconds": 2.616
+        },
+        {
+          "order": 4,
+          "language": "德语",
+          "locale": "de-DE",
+          "text": "Leb wohl, Sonnensystem.",
+          "voice": "de-DE-KatjaNeural",
+          "file": "04_de-DE.mp3",
+          "seconds": 2.856
+        }
+      ]
+    },
+    {
+      "group": 3,
+      "start": 37.35,
+      "end": 42.35,
+      "voices": [
+        {
+          "order": 5,
+          "language": "西班牙语",
+          "locale": "es-ES",
+          "text": "Adiós, sistema solar.",
+          "voice": "es-ES-AlvaroNeural",
+          "file": "05_es-ES.mp3",
+          "seconds": 2.808
+        },
+        {
+          "order": 6,
+          "language": "葡萄牙语（巴西）",
+          "locale": "pt-BR",
+          "text": "Adeus, Sistema Solar.",
+          "voice": "pt-BR-FranciscaNeural",
+          "file": "06_pt-BR.mp3",
+          "seconds": 2.52
+        }
+      ]
+    },
+    {
+      "group": 4,
+      "start": 42.35,
+      "end": 47.35,
+      "voices": [
+        {
+          "order": 7,
+          "language": "意大利语",
+          "locale": "it-IT",
+          "text": "Addio, Sistema Solare.",
+          "voice": "it-IT-DiegoNeural",
+          "file": "07_it-IT.mp3",
+          "seconds": 3.192
+        },
+        {
+          "order": 8,
+          "language": "俄语",
+          "locale": "ru-RU",
+          "text": "Прощай, Солнечная система.",
+          "voice": "ru-RU-DmitryNeural",
+          "file": "08_ru-RU.mp3",
+          "seconds": 3.048
+        }
+      ]
+    },
+    {
+      "group": 5,
+      "start": 47.35,
+      "end": 52.35,
+      "voices": [
+        {
+          "order": 9,
+          "language": "阿拉伯语",
+          "locale": "ar-SA",
+          "text": "وداعًا، أيتها المجموعة الشمسية.",
+          "voice": "ar-SA-HamedNeural",
+          "file": "09_ar-SA.mp3",
+          "seconds": 4.08
+        },
+        {
+          "order": 10,
+          "language": "印地语",
+          "locale": "hi-IN",
+          "text": "अलविदा, सौर मंडल।",
+          "voice": "hi-IN-SwaraNeural",
+          "file": "10_hi-IN.mp3",
+          "seconds": 2.952
+        }
+      ]
+    },
+    {
+      "group": 6,
+      "start": 52.35,
+      "end": 57.35,
+      "voices": [
+        {
+          "order": 11,
+          "language": "韩语",
+          "locale": "ko-KR",
+          "text": "안녕, 태양계.",
+          "voice": "ko-KR-SunHiNeural",
+          "file": "11_ko-KR.mp3",
+          "seconds": 2.52
+        },
+        {
+          "order": 12,
+          "language": "印度尼西亚语",
+          "locale": "id-ID",
+          "text": "Selamat tinggal, Tata Surya.",
+          "voice": "id-ID-ArdiNeural",
+          "file": "12_id-ID.mp3",
+          "seconds": 2.976
+        }
+      ]
+    }
+  ]
+}
