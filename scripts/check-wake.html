@@ -1,0 +1,94 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wake rendering checks</title>
+<style>body{background:#10151b;color:#d1e2e8;font:15px monospace}canvas{width:768px;max-width:100%}pre{white-space:pre-wrap}</style>
+<pre id="result">Rendering the production wake shader…</pre>
+<script>window.exports = {};</script>
+<script src="three.legacy.js"></script>
+<script>
+(async () => {
+  const THREE = window.exports, R = 2.5, width = 384, height = 216;
+  const result = document.getElementById('result');
+  const checks = [];
+  function check(condition, message) {
+    if (!condition) throw new Error(message);
+    checks.push('PASS  ' + message);
+  }
+  try {
+    const html = await (await fetch('../index.html', {cache:'no-store'})).text();
+    const start = html.indexOf('    function addVolumetricExhaust()');
+    const end = html.indexOf('    function addStars()', start);
+    if (start < 0 || end < 0) throw new Error('Production wake function not found');
+    const renderer = new THREE.WebGLRenderer({antialias:false});
+    renderer.setSize(width, height);
+    document.body.append(renderer.domElement);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000);
+    const camera = new THREE.PerspectiveCamera(39, width / height, .06, 160);
+    camera.position.set(1.25, .33, 9.53);
+    camera.lookAt(1.35, 0, 0);
+    camera.updateMatrixWorld();
+    const earthRoot = new THREE.Group();
+    earthRoot.rotation.set(-5 * Math.PI / 180, 14 * Math.PI / 180, -Math.PI / 2);
+    scene.add(earthRoot);
+    earthRoot.add(new THREE.Mesh(new THREE.SphereGeometry(R,96,64),new THREE.MeshBasicMaterial({color:0x000000})));
+    const wake = new Function('THREE','R','camera','earthRoot',
+      html.slice(start,end) + ';return addVolumetricExhaust();')(THREE,R,camera,earthRoot);
+    const uniforms = wake.material.uniforms;
+    function render(time, growth, opacity = 1) {
+      earthRoot.updateMatrixWorld(true);
+      uniforms.uCameraLocal.value.copy(camera.position);
+      earthRoot.worldToLocal(uniforms.uCameraLocal.value);
+      uniforms.uTime.value = time;
+      uniforms.uGrowth.value = growth;
+      uniforms.uOpacity.value = opacity;
+      renderer.render(scene,camera);
+      const pixels = new Uint8Array(width * height * 4);
+      const gl = renderer.getContext();
+      gl.readPixels(0,0,width,height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+      return pixels;
+    }
+    function sample(pixels, localPoint, radius = 3) {
+      const point = earthRoot.localToWorld(localPoint.clone()).project(camera);
+      const x = Math.round((point.x * .5 + .5) * width);
+      const y = Math.round((point.y * .5 + .5) * height);
+      let sum = 0;
+      for(let yy=y-radius; yy<=y+radius; yy++) for(let xx=x-radius; xx<=x+radius; xx++) {
+        if(xx<0 || xx>=width || yy<0 || yy>=height) continue;
+        const i = (yy * width + xx) * 4;
+        sum += pixels[i] + pixels[i+1] + pixels[i+2];
+      }
+      return sum;
+    }
+    const source = new THREE.Vector3(0,.55,.89).multiplyScalar(R);
+    const forward = new THREE.Vector3(0,-.65,.82).multiplyScalar(R);
+    const distant = new THREE.Vector3(0,2.35,.15).multiplyScalar(R);
+    const off = render(0,0,0);
+    const early = render(2,.18);
+    const mature = render(11.6,1);
+    check(sample(off,source) === 0 && sample(off,distant) === 0, 'No wake before ignition');
+    check(sample(early,distant) === 0, 'Growth has not reached the distant tail');
+    check(sample(early,source) > 15, 'Mist grows at the source before the distant tail');
+    check(sample(mature,source) > 15, 'Mist is visible in front of the rear hemisphere');
+    check(sample(mature,forward) === 0, 'The forward hemisphere is not covered by wake');
+    check(sample(mature,distant) > 60, 'Mature wake reaches the downstream region');
+    const later = render(12.6,1);
+    let change = 0;
+    for(let i=0;i<later.length;i+=4) change += Math.abs(later[i+2]-mature[i+2]);
+    check(change > 250, 'The established wake continues to move');
+    earthRoot.rotation.y += .5;
+    const turned = render(11.6,1);
+    check(sample(turned,source) > 15, 'Surface mist remains visible when the view rotates');
+    const programs = renderer.info.programs || [];
+    check(programs.every(p=>!p.diagnostics || p.diagnostics.runnable !== false), 'All GPU programs compile');
+    earthRoot.rotation.y -= .5;
+    render(11.6,1);
+    result.textContent = checks.join('\n') + '\n\nAll ' + checks.length + ' rendering checks passed.';
+    document.title = 'PASS — Wake rendering checks';
+  } catch(error) {
+    result.textContent = checks.join('\n') + '\nFAIL  ' + error.message;
+    document.title = 'FAIL — Wake rendering checks';
+    console.error(error);
+  }
+})();
+</script>

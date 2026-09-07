@@ -2206,39 +2206,52 @@
     scene.fog = new THREE.FogExp2(0x010309, 0.006);
     const camera = new THREE.PerspectiveCamera(39, innerWidth / innerHeight, 0.06, 160);
     const cameraTarget = new THREE.Vector3();
+    const worldDragPivot = new THREE.Vector3();
 
     const rand = mulberry32(271828);
     const clock = new THREE.Clock();
+    // 除 DOM 舷窗/HUD 层外，所有 3D 内容都挂在 worldGroup 下；
+    // 左键拖拽时刚性旋转整个组（太阳、尾流、星空随地球一起转），
+    // 昼夜分界固定在地表上，观察角度随拖拽变化。
+    const worldGroup = new THREE.Group();
+    worldGroup.rotation.order = 'YXZ';
+    scene.add(worldGroup);
     const earthRoot = new THREE.Group();
     // 开场保留熟悉的地轴倾角；赤道转向发动机点亮后再转到最终横置姿态。
     earthRoot.rotation.z = THREE.MathUtils.degToRad(-23.4);
-    scene.add(earthRoot);
+    worldGroup.add(earthRoot);
     const earthSpin = new THREE.Group();
     earthRoot.add(earthSpin);
 
-    // 环境光只留极低填充；单一太阳主光负责把昼夜终止线照出来。
-    scene.add(new THREE.HemisphereLight(0x3c5e73, 0x01030a, 0.20));
+    // 环境光保留低填充，让夜面呈现暗灰蓝（对照片尾剧照：盘面不是纯黑）；
+    // 单一太阳主光负责把昼夜终止线照出来。
+    const fillLight = new THREE.HemisphereLight(0x3c5e73, 0x01030a, 0.46);
+    scene.add(fillLight);
     const key = new THREE.DirectionalLight(0xfff1dc, 14);
     key.position.set(-8, .6, -3.5);
     key.target = earthRoot;
-    scene.add(key);
+    worldGroup.add(key);
     const visualSunDirection = new THREE.Vector3();
+    const illuminationDirection = new THREE.Vector3();
     const sunOrbitDirection = new THREE.Vector3();
-    // 终态太阳位于默认观察方向的地球正后方；仍是场景实体，旋转视角即可看到。
-    const terminalSunDirection = new THREE.Vector3(0, -.038, -1).normalize();
+    // 终态太阳位于地球左后方，在最终机位被地球遮挡；旋转视角仍可看到。
+    const terminalSunDirection = new THREE.Vector3(-.9, -.04, -1).normalize();
+    const hiddenSunDirection = new THREE.Vector3(0, 0, -1);
 
     const earthMaterial = new THREE.MeshPhongMaterial({
       color: 0x213947,
-      specular: 0x688b9e,
+      // Keep broad ocean glare from moving across the globe when orbiting the scene.
+      specular: 0x000000,
       shininess: 13,
       emissive: 0x01070c,
-      emissiveIntensity: .38
+      emissiveIntensity: .50
     });
-    // 用受控 twilight 柔化终止线，让受光半球在远景保持可读；方向仍来自真实太阳。
+    // 平行阳光下昼半球不可能超过一半：twilight 只允许越过终止线约 10°，
+    // 终止线外迅速归零，让受光区始终少于半个地球，夜面靠城市灯光与大气散射可读。
     earthMaterial.onBeforeCompile = shader => {
       const solarPhongChunk = THREE.ShaderChunk.lights_phong_pars_fragment.replace(
         'float dotNL = saturate( dot( geometryNormal, directLight.direction ) );',
-        'float dotNL = smoothstep( -.92, .10, dot( geometryNormal, directLight.direction ) );'
+        'float dotNL = smoothstep( -.18, .06, dot( geometryNormal, directLight.direction ) );'
       );
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <lights_phong_pars_fragment>',
@@ -2453,12 +2466,7 @@
     const stationCalloutHalo = $('stationCalloutHalo');
     const stationScreen = new THREE.Vector3();
     const starField = addStars();
-    const smoke = addOrbitalSmoke();
-    const exhaustWisps = addExhaustWisps();
     const exhaustVolume = addVolumetricExhaust();
-    // 交叉薄层与短流丝作为主尾流；旧体积场保持停用，避免形成规则雾带。
-    exhaustVolume.visible = false;
-    const exhaustFilaments = addWakeFilaments();
     const engineSystem = addEngines();
 
     const manager = new THREE.LoadingManager();
@@ -2470,6 +2478,19 @@
       manager.setURLModifier(url => window.__earth3dFileTextures[url] || url);
     }
     const textureRoot = './img/';
+    const moonMaterial = new THREE.MeshPhongMaterial({
+      color: 0x7f8b91, specular: 0x26343a, shininess: 3,
+      transparent: true, opacity: 0, depthWrite: true
+    });
+    const moon = new THREE.Mesh(new THREE.SphereGeometry(.14, 32, 20), moonMaterial);
+    moon.position.set(0, 8.25, .12);
+    moon.visible = false;
+    earthRoot.add(moon);
+    loader.load(textureRoot + 'moon_1024.jpg', tex => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      moonMaterial.map = tex;
+      moonMaterial.needsUpdate = true;
+    });
     const colorMap = loader.load(textureRoot + 'earth_atmos_2048.jpg', tex => {
       tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
       earthMaterial.map = tex; earthMaterial.color.set(0x52636a); earthMaterial.needsUpdate = true;
@@ -2499,6 +2520,18 @@
     let userUntil = 0;
     let stationPointerInside = false, stationPointerX = 0, stationPointerY = 0;
     let stationHovered = false;
+
+    // 调试钩子：?t=27 跳到指定秒并暂停；&yaw=.6&pitch=.3 固定拖拽偏移（不自动回正），便于截图验收。
+    const debugParams = new URLSearchParams(location.search);
+    if (debugParams.has('t')) {
+      playhead = THREE.MathUtils.clamp(parseFloat(debugParams.get('t')) || 0, 0, 1e5);
+      playing = false; $('play').textContent = '播放';
+    }
+    if (debugParams.has('yaw')) { yawOffset = parseFloat(debugParams.get('yaw')) || 0; userUntil = Infinity; }
+    if (debugParams.has('pitch')) {
+      pitchOffset = THREE.MathUtils.clamp(parseFloat(debugParams.get('pitch')) || 0, -1, 1);
+      userUntil = Infinity;
+    }
 
     function setStationHovered(next) {
       if (stationHovered === next) return;
@@ -2631,15 +2664,14 @@
       // 原转向段为 3.35 秒；延长到 6.7 秒，角速度严格减半。
       const earthTurn = smooth(EARTH_TURN_START, EARTH_TURN_END, t);
       const horizontalAlign = smooth(HORIZONTAL_ALIGN_START, HORIZONTAL_ALIGN_END, t);
-      const solarTravel = smooth(8.1, 17.35, t) * .35
-        + smooth(17.35, 23.35, t) * .10
-        + smooth(23.35, 25.10, t) * .55;
-      // 地球完成转向后，太阳入射逐步转到侧向，避免正视图只剩窄月牙。
-      const solarSideTravel = smooth(8.1, 16.8, t);
-      // 不再把镜头猛推到夜景球壳前；只保留很轻的呼吸式漂移，由地球本身转向揭示发动机。
-      const autoRadius = THREE.MathUtils.lerp(11.35, 11.7 - wideDrift*.24, dissolve);
-      const autoYaw = -.015 + yawOffset;
-      const autoPitch = .035 + pitchOffset;
+      const solarPathTime = Math.min(t, EARTH_TURN_END);
+      const solarTravel = smooth(8.1, 17.35, solarPathTime) * .35;
+      // 转向期间太阳入射逐步转到侧向，之后从该位置缓慢移向背面。
+      const solarSideTravel = smooth(8.1, 16.8, solarPathTime);
+      // 相机保持默认机位；左键拖拽改为整体旋转世界组（见下方 worldGroup）。
+      const autoRadius = THREE.MathUtils.lerp(11.35, 9.65 - wideDrift*.12, dissolve);
+      const autoYaw = -.015;
+      const autoPitch = .035;
 
       const wideEarthX = THREE.MathUtils.lerp(.28, -.18, wideDrift);
       earthRoot.position.x = THREE.MathUtils.lerp(THREE.MathUtils.lerp(-1.0, .38, approach), wideEarthX, dissolve);
@@ -2649,8 +2681,8 @@
       const pathSunX = THREE.MathUtils.lerp(closeSunX, wideSunX, earthTurn);
       const pathSunY = THREE.MathUtils.lerp(.12, -.05, dissolve);
       const pathSunZ = THREE.MathUtils.lerp(-5.8, -.2, solarSideTravel);
-      // 终态沿同一固定半径继续过渡；光照始终来自画面中的太阳。
-      const occult = smooth(FINAL_OCCULT_START, FINAL_OCCULT_END, t);
+      // 转向完成后沿固定半径缓慢移向左后方，只经过一次遮蔽，不再折返。
+      const occult = smooth(EARTH_TURN_END, FINAL_OCCULT_END, t);
       sunOrbitDirection.set(
         pathSunX - earthRoot.position.x,
         pathSunY - earthRoot.position.y,
@@ -2658,10 +2690,19 @@
       ).normalize();
       sunOrbitDirection.lerp(terminalSunDirection, occult).normalize();
       sun.group.position.copy(earthRoot.position).addScaledVector(sunOrbitDirection, SUN_DISTANCE);
-      sun.group.scale.setScalar(.88 + dissolve*.12);
+      sun.group.scale.setScalar(.88 + dissolve*.12 + occult*.5);
+      const moonReveal = smooth(23.55, 24.45, t);
+      moon.visible = moonReveal > .005;
+      moonMaterial.opacity = moonReveal * .88;
+      moon.position.y = 8.25 + Math.sin(t*.045) * .055;
+      moon.position.z = .12 + Math.cos(t*.035) * .035;
+      moon.rotation.y = t * .018;
       visualSunDirection.copy(sunOrbitDirection);
-      // 表面主光始终来自画面中的太阳，而不是固定在地球左侧。
-      key.position.copy(earthRoot.position).addScaledVector(visualSunDirection, 12);
+      // 太阳逐渐移到左后方，主光同步转为背光，让终态地球只露窄亮边。
+      illuminationDirection.copy(visualSunDirection)
+        .lerp(hiddenSunDirection, occult * .52)
+        .normalize();
+      key.position.copy(earthRoot.position).addScaledVector(illuminationDirection, 12);
       debris.group.position.x = -approach*.75;
       debris.group.rotation.y = t*.018;
       debris.material.opacity = .72 - dissolve*.6;
@@ -2683,8 +2724,11 @@
       const radius = THREE.MathUtils.clamp(autoRadius, 4.15, 15);
       camera.zoom = Math.exp(zoomOffset);
       camera.updateProjectionMatrix();
-      // 相机围绕地球中心取景，太阳和尾流都在同一视图轨道中随左键拖拽产生真实视差。
+      // 相机固定在默认机位取景；左键拖拽产生的偏移改为刚性旋转 worldGroup，
+      // 太阳、尾流、星空与地球一起转，昼区域相对地球盘面保持不动；舷窗 HUD 是 DOM 层，不参与。
+      const finalFraming = smooth(18.0, FINAL_FORM_START, t);
       cameraTarget.copy(earthRoot.position);
+      cameraTarget.x += finalFraming * 1.35;
       camera.position.set(
         cameraTarget.x + Math.sin(yaw) * Math.cos(pitch) * radius,
         cameraTarget.y + Math.sin(pitch) * radius,
@@ -2692,11 +2736,18 @@
       );
       camera.lookAt(cameraTarget);
       camera.updateMatrixWorld();
+      // 终态平滑转到赤道发动机带居中的机位；拖拽仍绕地球中心旋转。
+      worldGroup.rotation.y = -yawOffset - finalFraming * .19;
+      worldGroup.rotation.x = pitchOffset;
+      worldGroup.position.copy(earthRoot.position).sub(
+        worldDragPivot.copy(earthRoot.position).applyQuaternion(worldGroup.quaternion)
+      );
+      worldGroup.updateMatrixWorld();
 
       earthRoot.rotation.z = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(-23.4, -90, earthTurn));
       // 原片不是正侧视赤道：转向后从斜侧观察，赤道光带落在右半球并形成弯曲窄弧。
       const turnYaw = THREE.MathUtils.lerp(0, 20, earthTurn);
-      // 第一次转向定位后继续水平左旋；终态保留少量偏航，使赤道环落在十字右侧并保持圆弧透视。
+      // 第一次转向定位后继续水平左旋；最终居中取景由世界组的观察偏航完成。
       earthRoot.rotation.y = THREE.MathUtils.degToRad(turnYaw - horizontalAlign * 6);
       earthRoot.rotation.x = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(0, -5, earthTurn));
       // 推进发动机沿地球局部 +Y 喷出；转向后该方向应落在画面右侧尾流。
@@ -2712,11 +2763,9 @@
         .055 * Math.sin(finalCruiseTime * .63 + .7)
         + .018 * Math.sin(finalCruiseTime * 1.37 + 2.4)
       );
-      atmosphere.material.uniforms.uPlanetCenter.value.copy(earthRoot.position);
-      atmosphere.material.uniforms.uSunDirection.value.copy(visualSunDirection);
+      syncPlanetLighting();
       atmosphere.material.uniforms.uIntensity.value = .92 * glowBreath;
       nightMaterial.uniforms.uOpacity.value = .68 + dissolve*.16;
-      nightMaterial.uniforms.uSunDirection.value.copy(visualSunDirection);
       // 终态建立后让星空持续定向漂移；四层不同角速度制造轻微视差，表现地球正在前进。
       // 地球向画面左侧启航时，背景星空反向漂移，产生观察者视角的视差。
       starField.rotation.y = Math.min(t, FINAL_FORM_START) * .0011 - finalCruiseTime * .0036;
@@ -2747,24 +2796,31 @@
       updateStationCallout();
 
       const engineStatus = engineSystem.update(t);
-      updateSmoke(smoke, t);
-      exhaustWisps.update(t);
-      exhaustFilaments.update(t);
-      // 尾流属于地球整体，不再锁定相机朝向；拖拽视角时与地球保持同一姿态。
+      exhaustVolume.visible = t > WAKE_START;
       if (exhaustVolume.visible) {
-        exhaustVolume.position.set(0, R + 3.4, -.35);
-        exhaustVolume.updateMatrixWorld(true);
-        exhaustVolume.userData.localCamera.copy(camera.position);
-        exhaustVolume.worldToLocal(exhaustVolume.userData.localCamera);
-        exhaustVolume.material.uniforms.uCameraLocal.value.copy(exhaustVolume.userData.localCamera);
-        exhaustVolume.material.uniforms.uTime.value = t;
-        exhaustVolume.material.uniforms.uOpacity.value = smooth(WAKE_START, 19.35, t);
-        exhaustVolume.material.uniforms.uGrowth.value = smooth(WAKE_START, WAKE_GROWTH_END, t);
+        earthRoot.updateMatrixWorld(true);
+        const uniforms = exhaustVolume.material.uniforms;
+        uniforms.uCameraLocal.value.copy(camera.position);
+        earthRoot.worldToLocal(uniforms.uCameraLocal.value);
+        uniforms.uMoon.value.set(moon.position.x, moon.position.y, moon.position.z, moon.visible ? .14 : 0);
+        uniforms.uTime.value = Math.max(0, t - WAKE_START);
+        uniforms.uOpacity.value = smooth(WAKE_START, 19.35, t);
+        uniforms.uGrowth.value = smooth(WAKE_START, WAKE_GROWTH_END, t);
       }
       updateUi(t, engineStatus, earthTurn);
       renderer.render(scene, camera);
     }
     requestAnimationFrame(animate);
+
+    function syncPlanetLighting() {
+      // Shader normals/positions are world-space; sunlight and fill must use that same frame.
+      earthRoot.getWorldPosition(atmosphere.material.uniforms.uPlanetCenter.value);
+      atmosphere.material.uniforms.uSunDirection.value
+        .copy(illuminationDirection).transformDirection(worldGroup.matrixWorld);
+      nightMaterial.uniforms.uSunDirection.value
+        .copy(visualSunDirection).transformDirection(worldGroup.matrixWorld);
+      fillLight.position.set(0, 1, 0).transformDirection(worldGroup.matrixWorld);
+    }
 
     function addSun() {
       const c = document.createElement('canvas'); c.width = c.height = 256;
@@ -2791,7 +2847,7 @@
       const streakTex=new THREE.CanvasTexture(s); streakTex.colorSpace=THREE.SRGBColorSpace;
       const streak=new THREE.Sprite(new THREE.SpriteMaterial({map:streakTex,color:0xffebcf,transparent:true,opacity:.50,blending:THREE.AdditiveBlending,depthWrite:false,depthTest:true}));
       streak.scale.set(6.4,.8,1); group.add(streak);
-      scene.add(group);
+      worldGroup.add(group);
       return { group, halo, streak };
     }
 
@@ -2960,7 +3016,7 @@
       stationLight.position.set(.05,.03,.2);
       group.add(stationLight);
 
-      scene.add(group);
+      worldGroup.add(group);
       const incoming = new THREE.Vector3(-5.2,1.8,4.15);
       const settled = new THREE.Vector3(-2.0,1.15,4.62);
       return {
@@ -3003,456 +3059,159 @@
         dummy.updateMatrix(); mesh.setMatrixAt(i,dummy.matrix);
       }
       mesh.instanceMatrix.needsUpdate = true;
-      const group = new THREE.Group(); group.add(mesh); scene.add(group);
+      const group = new THREE.Group(); group.add(mesh); worldGroup.add(group);
       return { group, material, mesh };
     }
 
-    function addExhaustWisps() {
-      const texture = makeTrailTexture();
-      const group = new THREE.Group();
-      const items = [];
-      const pathStart = R + .23;
-      const pathLength = 6.6;
-      // 局部 y 轴在终态转向后对应画面中的前进方向；尾流沿轴向自然散开。
-      const flowOffset = u => .10
-        + .82 * smooth(.04, .92, u)
-        + Math.sin(u * Math.PI) * .08;
-      for (let i=0;i<88;i++) {
-        const lane = i % 2 ? 1 : -1;
-        const material = new THREE.SpriteMaterial({
-          map:texture, color:i%5 ? 0x79c9ea : 0xe1faff,
-          transparent:true, opacity:0, depthWrite:false,
-          blending:THREE.AdditiveBlending,
-          rotation:(rand()-.5)*.08
-        });
-        const sprite = new THREE.Sprite(material);
-        const u = rand();
-        const width = 1.6+rand()*6.4, height=.07+rand()*.22;
-        const z = (rand()-.5)*3.6;
-        const spread = .20 + rand()*1.02;
-        const center = (rand()-.5)*.34;
-        sprite.position.set(center - lane * spread * flowOffset(u), pathStart + u * pathLength, z);
-        sprite.scale.set(width,height,1); group.add(sprite);
-        items.push({
-          sprite, material, lane, spread, center, u, width, height, z,
-          rotation:material.rotation, phase:rand()*8,
-          speed:.05+rand()*.08, max:.032+rand()*.082
-        });
-      }
-      earthSpin.add(group);
-      return {
-        update(t) {
-          const on = smooth(WAKE_START,19.0,t);
-          const growth = smooth(WAKE_START,WAKE_GROWTH_END,t);
-          items.forEach(item => {
-            const u = (item.u + t * item.speed * .22) % 1;
-            item.sprite.position.y = pathStart + u * pathLength;
-            item.sprite.position.x = item.center - item.lane * item.spread * flowOffset(u)
-              + Math.sin(t*.35+item.phase)*.05
-              + Math.sin(t*.09+item.phase)*.025;
-            item.sprite.position.z = item.z + Math.sin(t*.17+item.phase)*.09;
-            item.sprite.material.rotation = item.rotation
-              - item.lane * .30 * (1 - smooth(.05,.62,u));
-            item.sprite.scale.set(
-              item.width * (.52 + u*.70),
-              item.height * (1.08 - u*.22),
-              1
-            );
-            const fade = smooth(.01,.12,u) * (1 - smooth(.82,1,u));
-            const growthGate = 1 - smooth(growth-.16, growth+.06, u);
-            item.material.opacity = on*growth*growthGate*item.max*fade
-              *(.72+Math.sin(t*.7+item.phase)*.22);
-          });
-        }
-      };
-    }
-
     function addVolumetricExhaust() {
-      // 盒内射线步进的 3D 密度场：没有贴片边界，旋转时会产生真实的前后遮挡和视差。
-      const geometry = new THREE.BoxGeometry(11.5, 9.8, 8.4, 1, 1, 1);
+      // The proxy and density use Earth-local coordinates; +Y is the engine axis.
+      const geometry = new THREE.BoxGeometry(R * 2.8, R * 5.3, R * 2.8);
+      geometry.translate(0, R * 2.35, 0);
       const material = new THREE.ShaderMaterial({
-        transparent:true, depthWrite:false, depthTest:true,
-        blending:THREE.AdditiveBlending, side:THREE.BackSide, toneMapped:false,
-        uniforms:{
-          uTime:{value:0}, uOpacity:{value:0}, uGrowth:{value:0},
-          uCameraLocal:{value:new THREE.Vector3()}
+        transparent: true, depthWrite: false, depthTest: true,
+        blending: THREE.NormalBlending, side: THREE.BackSide, toneMapped: false,
+        uniforms: {
+          uTime: { value: 0 }, uOpacity: { value: 0 }, uGrowth: { value: 0 },
+          uRadius: { value: R },
+          uCameraLocal: { value: new THREE.Vector3() },
+          uMoon: { value: new THREE.Vector4() },
+          uClip: { value: new THREE.Vector2(camera.near, camera.far) }
         },
-        vertexShader:`
+        vertexShader: `
           varying vec3 vLocalPosition;
-          void main(){
-            vLocalPosition=position;
-            gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);
+          varying float vViewDepth;
+          void main() {
+            vLocalPosition = position;
+            vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+            vViewDepth = -viewPosition.z;
+            gl_Position = projectionMatrix * viewPosition;
           }
         `,
-        fragmentShader:`
+        fragmentShader: `
           varying vec3 vLocalPosition;
-          uniform float uTime;
-          uniform float uOpacity;
-          uniform float uGrowth;
+          varying float vViewDepth;
+          uniform float uTime, uOpacity, uGrowth, uRadius;
           uniform vec3 uCameraLocal;
-          const float HALF_X=5.75;
-          const float HALF_Y=4.90;
-          const float HALF_Z=4.20;
-          const int STEPS=30;
+          uniform vec4 uMoon;
+          uniform vec2 uClip;
+          const int STEPS = 72;
 
-          float hash13(vec3 p){
-            p=fract(p*.1031);
-            p+=dot(p,p.yzx+33.33);
-            return fract((p.x+p.y)*p.z);
+          float hash13(vec3 p) {
+            p = fract(p * .1031);
+            p += dot(p, p.yzx + 33.33);
+            return fract((p.x + p.y) * p.z);
           }
-          float noise3(vec3 p){
-            vec3 i=floor(p), f=fract(p);
-            f=f*f*(3.0-2.0*f);
+          float noise3(vec3 p) {
+            vec3 i = floor(p), f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
             return mix(
-              mix(mix(hash13(i),hash13(i+vec3(1,0,0)),f.x),
-                  mix(hash13(i+vec3(0,1,0)),hash13(i+vec3(1,1,0)),f.x),f.y),
-              mix(mix(hash13(i+vec3(0,0,1)),hash13(i+vec3(1,0,1)),f.x),
-                  mix(hash13(i+vec3(0,1,1)),hash13(i+vec3(1,1,1)),f.x),f.y),f.z);
+              mix(mix(hash13(i), hash13(i + vec3(1,0,0)), f.x),
+                  mix(hash13(i + vec3(0,1,0)), hash13(i + vec3(1,1,0)), f.x), f.y),
+              mix(mix(hash13(i + vec3(0,0,1)), hash13(i + vec3(1,0,1)), f.x),
+                  mix(hash13(i + vec3(0,1,1)), hash13(i + vec3(1,1,1)), f.x), f.y), f.z);
           }
-          float fbm3(vec3 p){
-            float v=0.0, a=.5;
-            for(int i=0;i<3;i++){
-              v+=a*noise3(p);
-              p=p*2.02+vec3(17.3,9.1,5.7);
-              a*=.5;
-            }
-            return v;
+          float fbm3(vec3 p) {
+            return .57 * noise3(p) + .28 * noise3(p * 2.03 + 13.7)
+              + .15 * noise3(p * 4.11 + 31.3);
           }
-          float filamentLine(vec2 q, vec2 center, vec2 width){
-            vec2 d=(q-center)/width;
-            return exp(-dot(d,d));
+          vec2 raySphere(vec3 origin, vec3 direction, float radius) {
+            float b = dot(origin, direction);
+            float h = b * b - dot(origin, origin) + radius * radius;
+            if (h < 0.0) return vec2(-1.0);
+            h = sqrt(h);
+            return vec2(-b - h, -b + h);
           }
-          void main(){
-            vec3 ro=uCameraLocal;
-            vec3 rd=normalize(vLocalPosition-ro);
-            // 零分量用正号代替，避免视线恰好平行盒面时把交段算成空集。
-            vec3 invRd=1.0/max(abs(rd),vec3(.0001))*sign(rd+vec3(.000001));
-            vec3 t0=(vec3(-HALF_X,-HALF_Y,-HALF_Z)-ro)*invRd;
-            vec3 t1=(vec3(HALF_X,HALF_Y,HALF_Z)-ro)*invRd;
-            vec3 tMin=min(t0,t1), tMax=max(t0,t1);
-            float enter=max(max(tMin.x,tMin.y),tMin.z);
-            float exit=min(min(tMax.x,tMax.y),tMax.z);
-            enter=max(enter,0.0);
-            if(exit<=enter) discard;
+          float wakeDensity(vec3 p) {
+            float altitude = length(p) - 1.0;
+            if (altitude < .002 || p.y < -.16 || p.y > 4.9) return 0.0;
+            float downstream = max(p.y, 0.0);
+            float spread = exp(-downstream * .17);
+            vec2 crossSection = p.xz / spread;
+            float drift = uTime * .19;
+            vec3 flow = vec3(p.y * .80 - drift, crossSection.x * 2.7, crossSection.y * 1.25);
+            vec2 bend = vec2(noise3(flow * .57), noise3(flow * .61 + 18.4)) - .5;
+            float curlGrowth = smoothstep(.18, 2.6, downstream);
+            float fold = noise3(vec3(p.y * 2.4 - drift * .8, crossSection.x * 2.5, crossSection.y * .7)) - .5;
+            crossSection += bend * (.075 + .16 * smoothstep(.2, 3.4, downstream));
+            crossSection.x += fold * .09 * curlGrowth;
+            float outerNoise = noise3(vec3(p.y * 1.1 - drift * .4, crossSection.x * 3.4, crossSection.y));
+            float radial = length(crossSection) + (outerNoise - .5) * .10;
+            float envelope = 1.0 - smoothstep(.82, 1.08, radial);
+            // Keep the near-equatorial coat visible as the free wake tapers away.
+            float attachment = exp(-altitude / .075) * (1.0 - smoothstep(.55, 1.15, downstream));
+            envelope += (1.0 - envelope) * attachment * .70;
+            if (envelope <= 0.0) return 0.0;
 
-            float stepSize=(exit-enter)/float(STEPS);
-            vec3 accum=vec3(0.0);
-            float transmittance=1.0;
-            for(int i=0;i<STEPS;i++){
-              float fi=float(i)+.5;
-              vec3 p=ro+rd*(enter+fi*stepSize);
-              // 盒子的 -X 端靠近地球；参数沿前进方向从地表向外递增。
-              float u=clamp((p.x+HALF_X)/(HALF_X*2.0),0.0,1.0);
-              // 参考片尾的流体形态：离开球面时先形成短促的颈部，随后展开成束，远端再自然收窄。
-              float flare=smoothstep(.018,.34,u);
-              float downstreamTaper=1.0-.68*smoothstep(.36,1.0,u);
-              float spread=mix(.62,2.10,flare)*downstreamTaper;
-              float n=fbm3(vec3(p.x*.62-uTime*.105,p.y*.82+uTime*.018,p.z*1.02-uTime*.032));
-              float detail=noise3(vec3(p.x*1.45-uTime*.20,p.y*1.65,p.z*1.85+uTime*.06));
-              detail=.64*detail+.36*noise3(vec3(p.x*3.1+uTime*.11,p.y*2.7,p.z*3.4-uTime*.08));
-              float turbulence=smoothstep(.05,.88,u);
-              float bendY=(n-.5)*.68*turbulence;
-              float bendZ=(detail-.5)*.44*turbulence;
-              float radialY=(p.y-bendY)/max(spread,.02);
-              float radialZ=(p.z-bendZ)/max(spread*.76,.02);
-              float radial=length(vec2(radialY,radialZ));
-              float shell=exp(-pow(radial,2.25)*2.35);
-              float cloud=smoothstep(.24,.72,n*.74+detail*.32);
-              // 片尾式尾流：大量细丝从近地表的剪切层剥离，各自以不同相位缓慢卷曲。
-              // 丝束在真实 3D 横截面中分布，避免正视时合并成几条规则的粗光带。
-              float laneWarpY=(n-.5)*.14;
-              float laneWarpZ=(detail-.5)*.12;
-              vec2 q=vec2(radialY,radialZ);
-              float lanes=0.0;
-              for(int j=0;j<18;j++){
-                float fj=float(j);
-                float seedA=hash13(vec3(fj+1.0,2.7,8.3));
-                float seedB=hash13(vec3(fj+3.0,7.1,1.9));
-                float seedC=hash13(vec3(fj+5.0,4.6,6.2));
-                float angle=6.2831853*seedB;
-                float radius=mix(.10,.88,sqrt(seedA));
-                vec2 base=vec2(cos(angle),sin(angle))*radius;
-                float phase=6.2831853*seedC;
-                float frequency=mix(2.0,4.4,seedA);
-                vec2 curl=vec2(
-                  sin(u*frequency*6.2831853+phase+n*1.8)
-                    + sin(u*frequency*10.7+phase*.63)*.28,
-                  cos(u*frequency*4.31+phase*1.37-detail*1.6)
-                    + cos(u*frequency*8.4+phase*.81)*.24
-                );
-                vec2 center=base
-                  + curl*mix(.055,.145,seedC)
-                  + vec2(laneWarpY,laneWarpZ)*mix(.24,.52,seedB);
-                float width=mix(.024,.052,hash13(vec3(fj+9.0,3.4,5.1)))
-                  * mix(1.12,.78,smoothstep(.18,1.0,u));
-                float continuity=.56+.44*smoothstep(-.18,.72,
-                  sin(p.x*mix(.72,1.18,seedB)-uTime*.22+phase)+(n-.5)*.9);
-                lanes+=filamentLine(q,center,vec2(width,width*mix(.78,1.24,seedC)))*continuity;
-              }
-              float laneNoise=.56+.44*noise3(vec3(
-                p.x*.56-uTime*.24,
-                p.y*.72+p.z*.16,
-                p.z*.28));
-              float breakup=.62+.38*smoothstep(.24,.78,noise3(vec3(
-                p.x*.88-uTime*.31,
-                p.y*1.45+p.x*.16,
-                p.z*.52)));
-              lanes*=laneNoise*(.70+.30*breakup);
-              float core=exp(-pow(radial/max(mix(.46,.27,u),.02),2.0));
-              float density=shell*(.003+.007*cloud)
-                + lanes*(.90+1.75*laneNoise)
-                + core*.015;
-              density*=.80+.20*cloud;
-              float edgeFade=1.0-smoothstep(.78,1.02,radial);
-              float startFade=smoothstep(.005,.08,u);
-              float endFade=1.0-smoothstep(.68,1.0,u)*.64;
-              float growthFront=1.0-smoothstep(uGrowth-.13,uGrowth+.10,u);
-              float growth=smoothstep(0.0,.08,uGrowth)*growthFront;
-              float sampleAlpha=density*edgeFade*startFade*endFade*growth*uOpacity*stepSize*.96;
-              sampleAlpha=clamp(sampleAlpha,0.0,.42);
-              vec3 cold=vec3(.10,.42,.68), hot=vec3(.62,.95,1.);
-              vec3 color=mix(cold,hot,clamp(pow(1.0-u,1.7)+detail*.18,0.0,1.0));
-              accum+=transmittance*color*sampleAlpha;
-              transmittance*=1.0-sampleAlpha;
-              if(transmittance<.025) break;
+            // Shared, advected coordinates keep the surface mist and wake connected.
+            // Broad depth-coherent folds survive integration; fine structure breaks across them.
+            flow = vec3(p.y * .90 - drift, crossSection.x * 6.8, crossSection.y * 1.3);
+            float coarse = fbm3(flow * vec3(.60, .40, .80));
+            vec2 curl = vec2(coarse, noise3(flow * .67 + 27.3)) - .5;
+            flow.yz += curl * 1.7;
+            float ruffle = noise3(vec3(p.y * 6.0 - drift * 1.6, crossSection.x * 5.5, crossSection.y * .9 + 11.0)) - .5;
+            flow.y += fold * (.25 + 1.55 * curlGrowth) + ruffle * .45 * curlGrowth;
+            float streak = fbm3(flow * vec3(.90, 2.7, 1.0));
+            float fine = noise3(flow * vec3(2.2, 8.0, 1.6));
+            float ridge = pow(max(0.0, 1.0 - abs(streak * 2.0 - 1.0)), 10.0);
+            float wisps = smoothstep(.40, .91, ridge) * smoothstep(.18, .69, coarse + fine * .10);
+            float cloud = smoothstep(.31, .72, coarse * .35 + streak * .48 + fine * .17);
+            float skin = exp(-altitude / .108);
+            float source = smoothstep(-.055, .24, p.y + (coarse - .5) * .15);
+            float surface = smoothstep(.002, .022, altitude);
+            float distanceFade = exp(-downstream * .21) * (1.0 - smoothstep(3.4, 4.9, p.y));
+            // The front moves out from the equator; the distant wake cannot fade on early.
+            float front = uGrowth * 5.25;
+            float growth = (1.0 - smoothstep(front - .25, front + .04, p.y))
+              * smoothstep(0.0, .06, uGrowth);
+            return envelope * source * surface * growth * distanceFade
+              * (.016 + .22 * cloud + .70 * wisps) * (.34 + 4.10 * skin);
+          }
+          void main() {
+            vec3 ro = uCameraLocal / uRadius;
+            vec3 surfacePoint = vLocalPosition / uRadius;
+            vec3 rd = normalize(surfacePoint - ro);
+            vec3 invRd = 1.0 / max(abs(rd), vec3(.00001)) * sign(rd + vec3(.0000001));
+            vec3 t0 = (vec3(-1.4, -.3, -1.4) - ro) * invRd;
+            vec3 t1 = (vec3(1.4, 5.0, 1.4) - ro) * invRd;
+            vec3 lo = min(t0, t1), hi = max(t0, t1);
+            float enter = max(0.0, max(max(lo.x, lo.y), lo.z));
+            float end = min(min(hi.x, hi.y), hi.z);
+            vec2 planetHit = raySphere(ro, rd, 1.001);
+            if (planetHit.x > 0.0) end = min(end, planetHit.x);
+            if (uMoon.w > 0.0) {
+              vec2 moonHit = raySphere(ro - uMoon.xyz / uRadius, rd, uMoon.w / uRadius);
+              if (moonHit.x > 0.0) end = min(end, moonHit.x);
             }
-            float alpha=1.0-transmittance;
-            if(alpha<.002) discard;
-            gl_FragColor=vec4(accum,alpha);
+            if (end <= enter) discard;
+
+            // Test the ray entry, not the proxy's back face, against foreground objects.
+            // Earth and Moon clip the integration interval above, preserving mist in front.
+            float viewDepth = max(uClip.x, vViewDepth * enter / length(surfacePoint - ro));
+            gl_FragDepth = (uClip.y - uClip.x * uClip.y / viewDepth) / (uClip.y - uClip.x);
+            float stepSize = (end - enter) / float(STEPS);
+            float jitter = hash13(vec3(gl_FragCoord.xy, 17.1));
+            float transmittance = 1.0;
+            vec3 accum = vec3(0.0);
+            for (int i = 0; i < STEPS; i++) {
+              vec3 p = ro + rd * (enter + (float(i) + jitter) * stepSize);
+              float density = wakeDensity(p);
+              float alpha = 1.0 - exp(-density * stepSize * uOpacity * 2.6);
+              float nearSurface = exp(-max(0.0, length(p) - 1.0) * 5.0);
+              vec3 color = mix(vec3(.30, .45, .56), vec3(.56, .71, .79), nearSurface * .68);
+              accum += transmittance * alpha * color;
+              transmittance *= 1.0 - alpha;
+              if (transmittance < .035) break;
+            }
+            float alpha = 1.0 - transmittance;
+            if (alpha < .001) discard;
+            gl_FragColor = vec4(accum / max(alpha, .0001), alpha);
           }
         `
       });
       const volume = new THREE.Mesh(geometry, material);
-      // 终态地轴滚转约 −90°；预旋转体积尾流，使前进方向仍沿画面水平轴。
-      volume.rotation.z = Math.PI / 2;
-      volume.userData.localCamera = new THREE.Vector3();
+      volume.renderOrder = 2;
       earthRoot.add(volume);
       return volume;
-    }
-
-    function addWakeFilaments() {
-      // 短流丝组成的 3D 尾迹：没有任何一条线贯穿全程，旋转时也不会显成线框笼。
-      const group = new THREE.Group();
-      group.position.set(0, R + 4.0, -.35);
-      group.rotation.z = Math.PI / 2;
-      earthRoot.add(group);
-
-      const localRand = mulberry32(72419);
-      const glowCanvas = document.createElement('canvas');
-      glowCanvas.width = glowCanvas.height = 64;
-      const glowContext = glowCanvas.getContext('2d');
-      const glow = glowContext.createRadialGradient(32, 32, 0, 32, 32, 32);
-      glow.addColorStop(0, 'rgba(225,250,255,.72)');
-      glow.addColorStop(.28, 'rgba(130,216,246,.30)');
-      glow.addColorStop(1, 'rgba(55,135,205,0)');
-      glowContext.fillStyle = glow;
-      glowContext.fillRect(0, 0, 64, 64);
-      const glowTexture = new THREE.CanvasTexture(glowCanvas);
-      glowTexture.colorSpace = THREE.SRGBColorSpace;
-      const rootX = -4.15;
-      const wakeLength = 8.8;
-      const sheetGeometry = new THREE.PlaneGeometry(wakeLength, 5.2);
-      const sheets = [];
-      for (let i = 0; i < 7; i++) {
-        const material = new THREE.MeshBasicMaterial({
-          map: makeTrailTexture(localRand, .32),
-          color: i % 4 ? 0x78caed : 0xd8f8ff,
-          transparent: true, opacity: 0,
-          depthWrite: false, depthTest: true,
-          blending: THREE.AdditiveBlending,
-          side: THREE.DoubleSide,
-          toneMapped: false
-        });
-        const sheet = new THREE.Mesh(sheetGeometry, material);
-        sheet.position.set(rootX, (localRand() - .5) * .12, (localRand() - .5) * .12);
-        sheet.rotation.x = i / 7 * Math.PI + (localRand() - .5) * .16;
-        sheet.rotation.z = (localRand() - .5) * .018;
-        sheet.scale.set(.001, .72 + localRand() * .50, 1);
-        group.add(sheet);
-        sheets.push({ sheet, material, phase: localRand() * Math.PI * 2, max: .32 + localRand() * .18 });
-      }
-      const bundles = [];
-      for (let i = 0; i < 15; i++) {
-        bundles.push({
-          angle: i / 15 * Math.PI * 2 + (localRand() - .5) * .30,
-          radius: .48 + localRand() * .46,
-          phase: localRand() * Math.PI * 2,
-          curl: 1.5 + localRand() * 2.4
-        });
-      }
-      const fragments = [];
-      let segmentCount = 0;
-      for (let i = 0; i < 205; i++) {
-        const bundle = bundles[Math.floor(localRand() * bundles.length)];
-        const steps = 2 + Math.floor(localRand() * 4);
-        fragments.push({
-          u: localRand(),
-          angle: bundle.angle + (localRand() - .5) * .18,
-          radius: THREE.MathUtils.clamp(bundle.radius + (localRand() - .5) * .18, .18, 1),
-          phase: bundle.phase + (localRand() - .5) * .34,
-          curl: bundle.curl + (localRand() - .5) * .32,
-          speed: .0025 + localRand() * .006,
-          length: .055 + Math.pow(localRand(), 1.25) * .125,
-          brightness: .38 + localRand() * .62,
-          steps
-        });
-        segmentCount += steps;
-      }
-      const segmentPositions = new Float32Array(segmentCount * 6);
-      const segmentColors = new Float32Array(segmentCount * 6);
-      const segmentGeometry = new THREE.BufferGeometry();
-      segmentGeometry.setAttribute('position', new THREE.BufferAttribute(segmentPositions, 3));
-      segmentGeometry.setAttribute('color', new THREE.BufferAttribute(segmentColors, 3));
-      const segments = new THREE.LineSegments(segmentGeometry, new THREE.LineBasicMaterial({
-        color: 0xffffff, vertexColors: true,
-        transparent: true, opacity: 0, depthWrite: false, depthTest: true,
-        blending: THREE.AdditiveBlending, toneMapped: false
-      }));
-      group.add(segments);
-
-      const hazeCount = 980;
-      const hazePositions = new Float32Array(hazeCount * 3);
-      const hazeColors = new Float32Array(hazeCount * 3);
-      const hazeSpecs = [];
-      for (let i = 0; i < hazeCount; i++) {
-        const bundle = bundles[Math.floor(localRand() * bundles.length)];
-        hazeSpecs.push({
-          u: localRand(),
-          angle: bundle.angle + (localRand() - .5) * .30,
-          radius: THREE.MathUtils.clamp(bundle.radius + (localRand() - .5) * .30, .10, 1),
-          phase: bundle.phase + (localRand() - .5) * .52,
-          curl: bundle.curl + (localRand() - .5) * .48,
-          speed: .0016 + localRand() * .0042,
-          brightness: .28 + localRand() * .72
-        });
-      }
-      const hazeGeometry = new THREE.BufferGeometry();
-      hazeGeometry.setAttribute('position', new THREE.BufferAttribute(hazePositions, 3));
-      hazeGeometry.setAttribute('color', new THREE.BufferAttribute(hazeColors, 3));
-      const veil = new THREE.Points(hazeGeometry, new THREE.PointsMaterial({
-        map: glowTexture, color: 0x4f9bc4, vertexColors: true,
-        size: 1.45, sizeAttenuation: true,
-        transparent: true, opacity: 0, depthWrite: false, depthTest: true,
-        blending: THREE.AdditiveBlending, fog: false, toneMapped: false
-      }));
-      const haze = new THREE.Points(hazeGeometry, new THREE.PointsMaterial({
-        map: glowTexture, color: 0x8cdfff, vertexColors: true,
-        size: .54, sizeAttenuation: true,
-        transparent: true, opacity: 0, depthWrite: false, depthTest: true,
-        blending: THREE.AdditiveBlending, fog: false, toneMapped: false
-      }));
-      const sparks = new THREE.Points(hazeGeometry, new THREE.PointsMaterial({
-        map: glowTexture, color: 0xe5fbff, vertexColors: true,
-        size: .075, sizeAttenuation: true,
-        transparent: true, opacity: 0, depthWrite: false, depthTest: true,
-        blending: THREE.AdditiveBlending, fog: false, toneMapped: false
-      }));
-      group.add(veil, haze, sparks);
-
-      function writeFlowPosition(target, offset, spec, u, t) {
-        const open = smooth(.01, .24, u);
-        const close = smooth(.43, 1, u);
-        const spread = 1.14 + .62 * open - .92 * close;
-        const turbulence = .035 + .19 * smooth(.14, 1, u);
-        const angle = spec.angle
-          + Math.sin(u * spec.curl * Math.PI + spec.phase) * (.035 + u * .10)
-          + Math.sin(t * .11 + spec.phase) * .018;
-        const radial = spec.radius * spread;
-        target[offset] = rootX + u * wakeLength;
-        target[offset + 1] = Math.cos(angle) * radial
-          + Math.sin(u * 5.1 + spec.phase * .73 + t * .045) * turbulence;
-        target[offset + 2] = Math.sin(angle) * radial * .84
-          + Math.cos(u * 4.4 + spec.phase * .91 - t * .038) * turbulence * .82;
-      }
-
-      function writeColor(target, offset, strength, hot) {
-        target[offset] = strength * (hot ? .90 : .42);
-        target[offset + 1] = strength * (hot ? 1.00 : .82);
-        target[offset + 2] = strength;
-      }
-
-      return {
-        update(t) {
-          const elapsed = Math.max(0, t - WAKE_START);
-          const on = smooth(WAKE_START, 19.4, t);
-          const growth = smooth(WAKE_START, WAKE_GROWTH_END, t);
-          sheets.forEach(item => {
-            item.sheet.scale.x = Math.max(.001, growth);
-            item.sheet.position.x = rootX + wakeLength * growth * .5;
-            item.material.opacity = on * growth * item.max
-              * (.84 + Math.sin(t * .19 + item.phase) * .12);
-          });
-          let segmentIndex = 0;
-          fragments.forEach((spec, fragmentIndex) => {
-            const baseU = (spec.u + elapsed * spec.speed) % 1;
-            const shimmer = .78 + Math.sin(t * .83 + spec.phase) * .22;
-            for (let j = 0; j < spec.steps; j++) {
-              const startT = j / spec.steps;
-              const endT = (j + 1) / spec.steps;
-              const u = Math.min(1, baseU + spec.length * startT);
-              const endU = Math.min(1, baseU + spec.length * endT);
-              const middleU = (u + endU) * .5;
-              const fade = smooth(.005, .10, middleU) * (1 - smooth(.70, 1, middleU));
-              const growthGate = 1 - smooth(growth - .11, growth + .035, middleU);
-              const strength = spec.brightness * fade * growthGate * shimmer;
-              const startShape = .16 + .84 * Math.sin(Math.PI * startT);
-              const endShape = .16 + .84 * Math.sin(Math.PI * endT);
-              const offset = segmentIndex * 6;
-              writeFlowPosition(segmentPositions, offset, spec, u, t);
-              writeFlowPosition(segmentPositions, offset + 3, spec, endU, t);
-              writeColor(segmentColors, offset, strength * startShape, fragmentIndex % 7 === 0);
-              writeColor(segmentColors, offset + 3, strength * endShape, fragmentIndex % 7 === 0);
-              segmentIndex++;
-            }
-          });
-          hazeSpecs.forEach((spec, i) => {
-            const u = (spec.u + elapsed * spec.speed) % 1;
-            const fade = smooth(.015, .13, u) * (1 - smooth(.62, 1, u));
-            const growthGate = 1 - smooth(growth - .14, growth + .045, u);
-            const strength = spec.brightness * fade * growthGate
-              * (.76 + Math.sin(t * .41 + spec.phase) * .18);
-            const offset = i * 3;
-            writeFlowPosition(hazePositions, offset, spec, u, t);
-            writeColor(hazeColors, offset, strength, i % 11 === 0);
-          });
-          segmentGeometry.attributes.position.needsUpdate = true;
-          segmentGeometry.attributes.color.needsUpdate = true;
-          hazeGeometry.attributes.position.needsUpdate = true;
-          hazeGeometry.attributes.color.needsUpdate = true;
-          segments.material.opacity = on * .12;
-          veil.material.opacity = on * .006;
-          haze.material.opacity = on * .015;
-          sparks.material.opacity = on * .05;
-        }
-      };
-    }
-
-    function makeTrailTexture(random = rand, hazeStrength = 1) {
-      const c=document.createElement('canvas'); c.width=512; c.height=128;
-      const x=c.getContext('2d');
-      x.globalCompositeOperation='lighter';
-      for(let i=0;i<34;i++) {
-        const y=34+random()*60;
-        const grad=x.createLinearGradient(0,0,512,0);
-        const a=.070+random()*.15;
-        grad.addColorStop(0,'rgba(220,249,255,'+(a*1.4)+')');
-        grad.addColorStop(.18,'rgba(130,214,255,'+a+')');
-        grad.addColorStop(.62,'rgba(75,160,225,'+(a*.45)+')');
-        grad.addColorStop(1,'rgba(50,120,190,0)');
-        x.strokeStyle=grad; x.lineWidth=.55+random()*2.2; x.filter='blur('+(random()*2.2).toFixed(1)+'px)';
-        x.beginPath(); x.moveTo(-8,y);
-        x.bezierCurveTo(110,y+(random()-.5)*26,260,y+(random()-.5)*38,520,y+(random()-.5)*44);
-        x.stroke();
-      }
-      for(let i=0;i<6;i++) {
-        const y=46+random()*36;
-        const haze=x.createLinearGradient(0,0,512,0);
-        haze.addColorStop(0,`rgba(170,230,255,${.11*hazeStrength})`); haze.addColorStop(.45,`rgba(85,175,225,${.04*hazeStrength})`); haze.addColorStop(1,'rgba(50,120,180,0)');
-        x.filter='blur('+(6+random()*5).toFixed(1)+'px)'; x.strokeStyle=haze; x.lineWidth=8+random()*13;
-        x.beginPath(); x.moveTo(-12,y); x.bezierCurveTo(130,y+(random()-.5)*20,310,y+(random()-.5)*34,530,y+(random()-.5)*42); x.stroke();
-      }
-      const tex=new THREE.CanvasTexture(c); tex.colorSpace=THREE.SRGBColorSpace;
-      return tex;
     }
 
     function addStars() {
@@ -3620,7 +3379,7 @@
       root.add(new THREE.Points(sparkleGeo,sparkleMaterial));
       root.userData.twinkleLayers = twinkleLayers;
       root.userData.sparkleMaterial = sparkleMaterial;
-      scene.add(root);
+      worldGroup.add(root);
       return root;
     }
 
@@ -3719,6 +3478,8 @@
         new THREE.MeshBasicMaterial({ color: 0xeafcff, transparent: true, opacity: .14, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }),
         count
       );
+      outer.material.opacity = .045;
+      inner.material.opacity = .075;
       const softSquareTexture = makeSoftSquareTexture(false);
       const softSquareGlowTexture = makeSoftSquareTexture(true);
       const flareGlow = new THREE.InstancedMesh(
@@ -3737,6 +3498,9 @@
       flare.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       outer.frustumCulled = inner.frustumCulled = flareGlow.frustumCulled = flare.frustumCulled = false;
       tower.visible = false;
+      // 发动机近场尾焰保留；远场气流由体积尾流叠加。
+      outer.visible = true;
+      inner.visible = true;
       earthSpin.add(tower, outer, inner, flareGlow, flare);
 
       const dummy = new THREE.Object3D();
@@ -3767,7 +3531,10 @@
           const facing = e.torque ? THREE.MathUtils.clamp(e.n.dot(localCamera), 0, 1) : 1;
           const curvature = e.torque ? THREE.MathUtils.lerp(.38, 1, smooth(.03, .52, facing)) : 1;
           const plumeWeight = e.torque ? .32 * (.45 + curvature*.55) : e.plumeStrength;
-          const len = Math.max(.0001, e.length * plumeWeight * easeOutBack(p) * flicker);
+          // 赤道转向环只保留光点，不喷尾焰；尾焰只属于北半球推进发动机（沿地轴 +Y）。
+          // 近场火焰只延伸到体积流场根部，保留发动机来源但不切成独立直条。
+          const plumeReach = e.torque ? 1 : .24;
+          const len = Math.max(.0001, e.length * plumeWeight * easeOutBack(p) * flicker * plumeReach);
           q.setFromUnitVectors(up, e.out);
 
           const widthScale = e.torque ? .82 * (.58 + curvature*.42) : (e.isMain ? .72 : .46);
@@ -3823,85 +3590,6 @@
       const tex = new THREE.CanvasTexture(c);
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.magFilter = THREE.LinearFilter;
-      return tex;
-    }
-
-    function addOrbitalSmoke() {
-      const texture = makeSmokeTexture();
-      const rig = new THREE.Group();
-      const items = [];
-      const pathStart = R - .05;
-      const pathLength = 7.2;
-      const flowOffset = u => .10
-        + .86 * smooth(.04, .88, u)
-        + Math.sin(u * Math.PI) * .10;
-      for (let i = 0; i < 12; i++) {
-        const lane = i % 2 ? 1 : -1;
-        const mat = new THREE.SpriteMaterial({
-          map: texture, color: i % 4 ? 0x79acc4 : 0xb3d9e5,
-          transparent: true, opacity: 0, depthWrite: false,
-          blending: i % 3 ? THREE.NormalBlending : THREE.AdditiveBlending,
-          rotation: rand()*Math.PI
-        });
-        const sprite = new THREE.Sprite(mat);
-        const u = rand();
-        const z = -3-rand()*8;
-        const spread = .12 + rand()*.90;
-        const center = (rand()-.5)*.28;
-        const base = new THREE.Vector3(pathStart + u * pathLength, center + lane * spread * flowOffset(u), z);
-        const scale = .55 + rand()*1.8;
-        sprite.position.copy(base); sprite.scale.set(scale*(.72+u*1.13), scale*(.58+u*.02), 1);
-        rig.add(sprite);
-        items.push({ sprite, base, lane, spread, center, u, z, scale, pathLength, flowOffset, speed: .025+rand()*.045, phase: rand()*10, max: .006+rand()*.014 });
-      }
-      earthRoot.add(rig);
-      return { rig, items };
-    }
-
-    function updateSmoke(smoke, t) {
-      const ignition = smooth(WAKE_START, IGNITION_FULL, t);
-      const growth = smooth(WAKE_START,WAKE_GROWTH_END,t);
-      smoke.rig.rotation.z = Math.PI / 2 + Math.sin(t*.06)*.018;
-      smoke.items.forEach(item => {
-        const u = (item.u + t * item.speed * .16) % 1;
-        // 沿两条有限长度的流线循环，避免烟雾逐渐飞出场景或突然跳出画面。
-        item.sprite.position.x = item.base.x + u * item.pathLength
-          - item.u * item.pathLength
-          + Math.sin(t*.35+item.phase)*.08;
-        item.sprite.position.y = item.center + item.lane * item.spread * item.flowOffset(u)
-          + Math.sin(t*.28+item.phase)*.06;
-        item.sprite.position.z = item.z + Math.sin(t*.17+item.phase)*.10;
-        item.sprite.material.rotation += .00018 * item.lane;
-        item.sprite.scale.set(item.scale*(.72+u*1.13), item.scale*(.58+u*.02), 1);
-        const fade = smooth(.01,.12,u) * (1 - smooth(.84,1,u)*.8);
-        const growthGate = 1 - smooth(growth-.18, growth+.06, u);
-        item.sprite.material.opacity = item.max * ignition * growth * growthGate * fade
-          * (0.72 + Math.sin(t*.23+item.phase)*.2);
-      });
-    }
-
-    function makeSmokeTexture() {
-      const c = document.createElement('canvas'); c.width = c.height = 256;
-      const x = c.getContext('2d');
-      x.globalCompositeOperation = 'lighter';
-      for (let i=0; i<12; i++) {
-        const y = 20 + rand()*216;
-        const grad = x.createLinearGradient(0,0,256,0);
-        const a = .006 + rand()*.014;
-        grad.addColorStop(0, 'rgba(225,248,255,'+(a*1.5)+')');
-        grad.addColorStop(.2, 'rgba(145,220,246,'+a+')');
-        grad.addColorStop(.66, 'rgba(75,155,208,'+(a*.48)+')');
-        grad.addColorStop(1, 'rgba(45,105,170,0)');
-        x.strokeStyle = grad;
-        x.lineWidth = 1 + rand()*6;
-        x.filter = 'blur('+(2.5+rand()*5).toFixed(1)+'px)';
-        x.beginPath();
-        x.moveTo(-16,y);
-        x.bezierCurveTo(54,y+(rand()-.5)*24,142,y+(rand()-.5)*42,272,y+(rand()-.5)*58);
-        x.stroke();
-      }
-      x.filter = 'none';
-      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
       return tex;
     }
 
